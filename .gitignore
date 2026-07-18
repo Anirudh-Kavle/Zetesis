@@ -1,0 +1,30 @@
+CLAUDE.md
+flight-recorder-spec.md
+
+# Frontend
+node_modules/
+*.tsbuildinfo
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Storage
+~/.flight-recorder/
+*.db
+*.db-shm
+*.db-wal
+events/
+
+# OS
+.DS_Store
