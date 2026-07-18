@@ -8,16 +8,13 @@ import re
 import sqlite3
 from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import store
 
 app = FastAPI(title="Flight Recorder")
-
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def _conn() -> sqlite3.Connection:
@@ -33,11 +30,6 @@ def _event_to_dict(row: sqlite3.Row) -> dict:
     except (json.JSONDecodeError, TypeError):
         d["risk_reasons"] = []
     return d
-
-
-@app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 
 @app.get("/api/sessions")
@@ -63,11 +55,18 @@ def list_sessions() -> list[dict]:
 def session_events(session_id: str, risk: str | None = None, limit: int = 500) -> list[dict]:
     conn = _conn()
     try:
-        sql = "SELECT * FROM events WHERE session_id = ?"
-        params: list = [session_id]
+        # session_id "all" means no session filter — the viewer's full-history load.
+        where: list[str] = []
+        params: list = []
+        if session_id != "all":
+            where.append("session_id = ?")
+            params.append(session_id)
         if risk:
-            sql += " AND risk = ?"
+            where.append("risk = ?")
             params.append(risk)
+        sql = "SELECT * FROM events"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY ts DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
@@ -153,3 +152,20 @@ async def stream():
             conn.close()
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# The React viewer, mounted last so /api/* routes always win.
+# ponytail: repo-relative dist path; breaks for pip-installed wheels — package
+# the dist as data files if we ever ship one.
+DIST_DIR = Path(__file__).resolve().parents[2] / "viewer" / "dist"
+if DIST_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui")
+else:
+
+    @app.get("/")
+    def index() -> dict:
+        return {
+            "app": "flight-recorder",
+            "api": "/api/sessions",
+            "ui": "cd viewer && npm run build, or npm run dev (:5173 proxies /api)",
+        }

@@ -3,9 +3,9 @@ import { mockEvents, mockSessions, generateMockEvent } from "./mockData";
 import { filterEvents } from "./search";
 import * as api from "./api";
 
-// Single adapter behind the whole UI. Flip USE_MOCK to false once the FastAPI
-// backend (fr-viewer, :7878) is up — zero component changes required.
-const USE_MOCK = true;
+// Single adapter behind the whole UI. Live (:7878 via the vite proxy) by
+// default; VITE_USE_MOCK=true npm run dev brings back the mock demo.
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === "true";
 
 // Interval between simulated live events (ms). Demo-friendly cadence.
 const MOCK_STREAM_MS = 4000;
