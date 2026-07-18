@@ -40,10 +40,24 @@ def init_db() -> None:
     ensure_dirs()
     conn = get_conn()
     try:
-        conn.executescript(SCHEMA_PATH.read_text())
+        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply small, idempotent migrations to databases made by older builds."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+    if "action_id" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN action_id TEXT")
+    if "completed_at" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN completed_at INTEGER")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_action "
+        "ON events(session_id, action_id) WHERE action_id IS NOT NULL"
+    )
 
 
 def upsert_session(conn: sqlite3.Connection, session_id: str, ts: int, cwd: str | None,
@@ -66,7 +80,7 @@ def mark_session_ended(conn: sqlite3.Connection, session_id: str, ts: int) -> No
 
 def insert_event(conn: sqlite3.Connection, event: dict) -> int:
     cols = [
-        "session_id", "ts", "phase", "tool", "arguments_json", "result_json",
+        "session_id", "action_id", "ts", "completed_at", "phase", "tool", "arguments_json", "result_json",
         "exit_ok", "reasoning_text", "risk", "risk_reasons", "capture_gap",
         "git_branch", "git_head", "git_dirty", "files_touched",
     ]
@@ -77,6 +91,54 @@ def insert_event(conn: sqlite3.Connection, event: dict) -> int:
         values,
     )
     return cur.lastrowid
+
+
+def complete_event(
+    conn: sqlite3.Connection,
+    *,
+    session_id: str,
+    action_id: str | None,
+    tool: str | None,
+    completed_at: int,
+    result_json: str,
+    exit_ok: int,
+) -> int | None:
+    """Pair a result with its pre-action row and return that row's id."""
+    row = None
+    if action_id:
+        row = conn.execute(
+            "SELECT id FROM events WHERE session_id = ? AND action_id = ?",
+            (session_id, action_id),
+        ).fetchone()
+    if row is None:
+        row = conn.execute(
+            """
+            SELECT id FROM events
+            WHERE session_id = ? AND tool IS ? AND completed_at IS NULL
+                  AND phase = 'pre'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (session_id, tool),
+        ).fetchone()
+    if row is None:
+        return None
+    event_id = int(row[0])
+    conn.execute(
+        """
+        UPDATE events
+        SET phase = 'post', completed_at = ?, result_json = ?, exit_ok = ?
+        WHERE id = ?
+        """,
+        (completed_at, result_json, exit_ok, event_id),
+    )
+    return event_id
+
+
+def get_event(conn: sqlite3.Connection, event_id: int) -> dict:
+    row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    if row is None:
+        raise KeyError(event_id)
+    return dict(row)
 
 
 def append_jsonl(event: dict) -> None:

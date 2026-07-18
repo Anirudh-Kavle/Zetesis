@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+import uuid
 
 from . import gitstate, reasoning, risk, store
 
@@ -35,6 +36,10 @@ def _truncate(obj, max_len: int = 16 * 1024) -> tuple[str, bool]:
     return text, False
 
 
+def _serialize(obj) -> str:
+    return json.dumps(obj, ensure_ascii=False, default=str) if obj is not None else ""
+
+
 def _handle(payload: dict) -> None:
     hook_event_name = payload.get("hook_event_name", "Unknown")
     store.append_raw_payload(hook_event_name, payload)
@@ -44,6 +49,7 @@ def _handle(payload: dict) -> None:
     cwd = payload.get("cwd")
     transcript_path = payload.get("transcript_path")
     tool_name = payload.get("tool_name")
+    action_id = payload.get("tool_use_id") or payload.get("tool_call_id") or payload.get("call_id")
     ts = _now_ms()
 
     git = gitstate.capture(cwd)
@@ -58,12 +64,17 @@ def _handle(payload: dict) -> None:
         if hook_event_name == "PreCompact":
             reasoning.snapshot_transcript(transcript_path, session_id, store.SNAPSHOTS_DIR)
 
-        arguments_text, args_truncated = _truncate(payload.get("tool_input"))
+        arguments_text = _serialize(payload.get("tool_input"))
         result_text, result_truncated = _truncate(payload.get("tool_response"))
 
         reasoning_text, capture_gap = (None, True)
         if phase == "pre" and tool_name:
-            reasoning_text, capture_gap = reasoning.extract_reasoning(transcript_path)
+            explicit_reasoning = payload.get("reasoning_text") or payload.get("reasoning")
+            if isinstance(explicit_reasoning, str) and explicit_reasoning.strip():
+                reasoning_text = explicit_reasoning.strip()[-reasoning.MAX_REASONING_LEN:]
+                capture_gap = False
+            else:
+                reasoning_text, capture_gap = reasoning.extract_reasoning(transcript_path, action_id)
 
         risk_tier, risk_reasons = "info", []
         if tool_name:
@@ -72,17 +83,36 @@ def _handle(payload: dict) -> None:
         exit_ok = None
         if phase == "post":
             resp = payload.get("tool_response")
-            if isinstance(resp, dict) and "error" in resp:
+            if isinstance(resp, dict) and (
+                "error" in resp or resp.get("is_error") is True or resp.get("success") is False
+            ):
                 exit_ok = 0
             else:
                 exit_ok = 1
 
+        if phase == "post" and tool_name:
+            row_id = store.complete_event(
+                conn,
+                session_id=session_id,
+                action_id=action_id,
+                tool=tool_name,
+                completed_at=ts,
+                result_json=result_text + ("...[truncated]" if result_truncated else ""),
+                exit_ok=exit_ok if exit_ok is not None else 1,
+            )
+            if row_id is not None:
+                conn.commit()
+                store.append_jsonl(store.get_event(conn, row_id))
+                return
+
         event = {
             "session_id": session_id,
+            "action_id": action_id or (str(uuid.uuid4()) if phase == "pre" and tool_name else None),
             "ts": ts,
+            "completed_at": ts if phase == "post" else None,
             "phase": phase,
             "tool": tool_name,
-            "arguments_json": arguments_text + ("...[truncated]" if args_truncated else ""),
+            "arguments_json": arguments_text,
             "result_json": result_text + ("...[truncated]" if result_truncated else ""),
             "exit_ok": exit_ok,
             "reasoning_text": reasoning_text,

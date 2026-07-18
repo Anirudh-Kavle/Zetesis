@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT REFERENCES sessions(id),
+    action_id TEXT,
     ts INTEGER NOT NULL,
+    completed_at INTEGER,
     phase TEXT NOT NULL,
     tool TEXT,
     arguments_json TEXT,

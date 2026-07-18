@@ -5,15 +5,30 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:  # F1/F2 stay usable before optional app dependencies are installed.
+    yaml = None
 
 RULES_PATH = Path(__file__).with_name("risk_rules.yaml")
 
 TIER_ORDER = ["info", "write", "exec", "network", "sensitive"]
 
+FALLBACK_RULES = {
+    "tool_tiers": {
+        "Read": "info", "Glob": "info", "Grep": "info", "LS": "info",
+        "Edit": "write", "Write": "write", "NotebookEdit": "write",
+        "Bash": "exec", "WebFetch": "network", "WebSearch": "network",
+    },
+    "default_tier": "exec",
+    "patterns": [],
+}
+
 
 @lru_cache(maxsize=1)
 def _load_rules() -> dict:
+    if yaml is None:
+        return FALLBACK_RULES
     with RULES_PATH.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
 
