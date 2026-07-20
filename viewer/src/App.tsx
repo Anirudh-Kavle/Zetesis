@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type RiskTier, RISK_TIERS, type Session } from "./types";
 import { dataSource } from "./lib/dataSource";
+import { getUsage, updateBudget } from "./lib/api";
 import { useEventStream } from "./hooks/useEventStream";
 import { useKeyboardNav } from "./hooks/useKeyboardNav";
 import { byNewest } from "./lib/format";
@@ -14,6 +15,7 @@ import { EmptyState } from "./components/EmptyState";
 export default function App() {
   const { events, loading, lastArrivalId } = useEventStream();
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [dailyTokens, setDailyTokens] = useState(0);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -23,6 +25,7 @@ export default function App() {
 
   useEffect(() => {
     dataSource.getSessions().then(setSessions);
+    getUsage().then((u) => setDailyTokens(u.token_count)).catch(() => undefined);
   }, []);
 
   const live = sessions.some((s) => s.live);
@@ -76,6 +79,14 @@ export default function App() {
         search={search}
         onSearch={setSearch}
         onClearSearch={() => setSearch("")}
+        sessionBudget={(() => { const s = sessions.find((x) => x.token_limit); return s?.token_limit ? { id: s.id, used: s.token_used ?? 0, limit: s.token_limit, timeLimit: s.time_limit_s } : undefined; })()}
+        dailyTokens={dailyTokens}
+        onBudgetSaved={async (tokenLimit, timeLimit) => {
+          const s = sessions.find((x) => x.token_limit);
+          if (!s) return;
+          await updateBudget(s.id, tokenLimit, timeLimit);
+          setSessions((all) => all.map((x) => x.id === s.id ? { ...x, token_limit: tokenLimit ?? undefined, time_limit_s: timeLimit ?? undefined } : x));
+        }}
       />
 
       <div className="flex min-h-0 flex-1">
