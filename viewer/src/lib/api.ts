@@ -32,6 +32,9 @@ interface RawSession {
   cwd: string;
   git_repo: string | null;
   source: string | null;
+  token_limit?: number | null;
+  token_used?: number | null;
+  time_limit_s?: number | null;
 }
 
 // Parse a JSON-string column without ever throwing. The hook truncates
@@ -106,7 +109,26 @@ export function normalizeSession(raw: RawSession): Session {
     git_repo: raw.git_repo ?? undefined,
     source: SOURCE_MAP[raw.source ?? ""] ?? "interactive",
     live: raw.ended_at == null,
+    token_limit: raw.token_limit ?? undefined,
+    token_used: raw.token_used ?? undefined,
+    time_limit_s: raw.time_limit_s ?? undefined,
   };
+}
+
+export async function getUsage(): Promise<{ token_count: number }> {
+  const res = await fetch(`${API_BASE}/usage`);
+  if (!res.ok) throw new Error("Failed to fetch usage");
+  return res.json();
+}
+
+export async function updateBudget(sessionId: string, tokenLimit: number | null, timeLimit: number | null) {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/budget`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token_limit: tokenLimit, time_limit_s: timeLimit }),
+  });
+  if (!res.ok) throw new Error("Could not update session limits");
+  return res.json();
 }
 
 // --- Fetchers ---

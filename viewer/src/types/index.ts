@@ -30,6 +30,9 @@ export interface Session {
   source: "interactive" | "headless" | "resumed";
   label?: string; // human-friendly name for the sidebar
   live?: boolean; // currently recording
+  token_limit?: number;
+  token_used?: number;
+  time_limit_s?: number;
 }
 
 export const RISK_TIERS: RiskTier[] = [
