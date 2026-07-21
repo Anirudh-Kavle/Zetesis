@@ -1,0 +1,101 @@
+import type { FlightEvent, Session } from "../types";
+import { eventSummary } from "./format";
+
+export interface ParsedQuery {
+  text: string[]; // free-text terms
+  tool?: string;
+  risk?: string;
+  file?: string;
+  session?: string;
+  provider?: string;
+  exit?: string;
+  after?: string;
+  before?: string;
+}
+
+const QUALIFIERS = ["tool", "risk", "file", "session", "provider", "exit", "after", "before"] as const;
+
+// Hand-rolled qualifier parser (spec 3.2) — tool: risk: file: session: + free text. No lib.
+export function parseQuery(q: string): ParsedQuery {
+  const out: ParsedQuery = { text: [] };
+  for (const token of q.trim().split(/\s+/).filter(Boolean)) {
+    const m = token.match(/^(\w+):(.*)$/);
+    if (m && (QUALIFIERS as readonly string[]).includes(m[1])) {
+      (out as unknown as Record<string, string>)[m[1]] = m[2].toLowerCase();
+    } else {
+      out.text.push(token.toLowerCase());
+    }
+  }
+  return out;
+}
+
+// Which qualifier the user is mid-typing, for the chip hint UI.
+export function activeQualifier(q: string): string | null {
+  const last = q.split(/\s+/).pop() ?? "";
+  const m = last.match(/^(\w+):$/);
+  return m && (QUALIFIERS as readonly string[]).includes(m[1]) ? m[1] : null;
+}
+
+// A qualifier value can be a comma-separated OR-list (risk:write,exec) — the
+// filter panel writes these when more than one checkbox is checked. `tool:`
+// additionally supports `+`-joined aliases within one element (a single tool
+// tag can cover several raw names, e.g. Codex's "bash+run_command") and a
+// trailing `*` for prefix matches (mcp__*).
+function splitList(value: string): string[] {
+  return value.split(",").map((v) => v.trim()).filter(Boolean);
+}
+
+// session: can match either the raw id or the human-readable sidebar title
+// (the one Claude Code itself generates) — build once per session list and
+// pass through so filtering doesn't need to look sessions up per event.
+export function sessionTitleMap(sessions: Session[]): Map<string, string> {
+  return new Map(sessions.filter((s) => s.label).map((s) => [s.id, s.label!]));
+}
+
+export function filterEvents(
+  events: FlightEvent[],
+  q: string,
+  sessionTitles?: Map<string, string>
+): FlightEvent[] {
+  const p = parseQuery(q);
+  return events.filter((e) => {
+    if (p.tool) {
+      const tokens = splitList(p.tool).flatMap((t) => t.split("+"));
+      const lower = e.tool.toLowerCase();
+      const match = tokens.some((t) => (t.endsWith("*") ? lower.startsWith(t.slice(0, -1)) : lower === t));
+      if (!match) return false;
+    }
+    if (p.risk && !splitList(p.risk).includes(e.risk)) return false;
+    if (p.provider && e.provider.toLowerCase() !== p.provider) return false;
+    if (p.session) {
+      const terms = splitList(p.session);
+      const idLower = e.session_id.toLowerCase();
+      const title = sessionTitles?.get(e.session_id)?.toLowerCase();
+      const match = terms.some((s) => idLower.includes(s) || (title ? title.includes(s) : false));
+      if (!match) return false;
+    }
+    if (p.file) {
+      const files = (e.files_touched ?? []).join(" ").toLowerCase();
+      if (!files.includes(p.file)) return false;
+    }
+    if (p.exit) {
+      const wantOk = ["ok", "pass", "success"].includes(p.exit);
+      if (e.exit_ok !== wantOk) return false;
+    }
+    if (p.after && e.ts < Date.parse(p.after)) return false;
+    if (p.before && e.ts >= Date.parse(p.before)) return false;
+    if (p.text.length) {
+      const hay = (
+        eventSummary(e) +
+        " " +
+        (e.reasoning_text ?? "") +
+        " " +
+        e.tool
+      ).toLowerCase();
+      if (!p.text.every((t) => hay.includes(t))) return false;
+    }
+    return true;
+  });
+}
+
+export const SEARCH_QUALIFIERS = QUALIFIERS;

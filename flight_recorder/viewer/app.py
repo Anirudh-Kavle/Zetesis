@@ -6,18 +6,16 @@ import asyncio
 import json
 import re
 import sqlite3
+from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import store
 
 app = FastAPI(title="Flight Recorder")
-
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def _conn() -> sqlite3.Connection:
@@ -35,26 +33,85 @@ def _event_to_dict(row: sqlite3.Row) -> dict:
     return d
 
 
-@app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
-
-
 @app.get("/api/sessions")
 def list_sessions() -> list[dict]:
     conn = _conn()
     try:
+        # Deterministic per-session stat line: plain SQL counts, no inference.
+        # tool_kind can be NULL on rows from before normalization existed, so
+        # edit/bash counts also fall back to the raw tool name.
         rows = conn.execute(
             """
-            SELECT s.id, s.started_at, s.ended_at, s.cwd, s.git_repo, s.source,
-                   COUNT(e.id) as event_count, MAX(e.ts) as last_event_ts
+            SELECT s.id, s.started_at, s.ended_at, s.cwd, s.git_repo, s.source, s.title,
+                   s.token_limit, s.time_limit_s, s.token_used,
+                   COUNT(e.id) as event_count, MAX(e.ts) as last_event_ts,
+                   COUNT(e.id) FILTER (WHERE e.tool IS NOT NULL) AS action_count,
+                   COUNT(e.id) FILTER (WHERE e.tool_kind IN ('edit', 'write')
+                       OR LOWER(e.tool) IN ('edit', 'write', 'notebookedit', 'apply_patch', 'write_file')) AS edit_count,
+                   COUNT(e.id) FILTER (WHERE e.tool_kind = 'bash'
+                       OR LOWER(e.tool) IN ('bash', 'run_command')) AS bash_count,
+                   COUNT(e.id) FILTER (WHERE e.exit_ok = 0) AS failed_count,
+                   COUNT(e.id) FILTER (WHERE e.risk = 'sensitive') AS sensitive_count,
+                   MAX(e.git_branch) AS git_branch,
+                   (SELECT provider FROM events
+                    WHERE session_id = s.id AND provider IS NOT NULL
+                    ORDER BY ts ASC LIMIT 1) as provider
             FROM sessions s
             LEFT JOIN events e ON e.session_id = s.id
             GROUP BY s.id
             ORDER BY COALESCE(MAX(e.ts), s.started_at) DESC
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+        sessions = [dict(r) for r in rows]
+        for s in sessions:
+            # Project identity is derived, never stored: the repo root when the
+            # session ran in one, the plain working folder otherwise. Grouping
+            # is therefore a view over existing stamps — old sessions group
+            # correctly with zero migration.
+            key = s.get("git_repo") or s.get("cwd") or ""
+            s["project_key"] = key or "unknown"
+            s["project"] = re.split(r"[\\/]", key.rstrip("\\/"))[-1] if key else "unknown"
+        return sessions
+    finally:
+        conn.close()
+
+
+@app.get("/api/usage")
+def usage() -> dict:
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT day, token_count, updated_at FROM api_usage WHERE day = ?", (date.today().isoformat(),)).fetchone()
+        return dict(row) if row else {"day": date.today().isoformat(), "token_count": 0, "updated_at": None}
+    finally:
+        conn.close()
+
+
+@app.patch("/api/sessions/{session_id}/budget")
+def update_budget(session_id: str, payload: dict) -> dict:
+    """Update the shared API session limits used by the terminal agent."""
+    def value(name: str):
+        raw = payload.get(name)
+        if raw in (None, "", 0, "0"):
+            return None
+        try:
+            number = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"{name} must be a positive integer or null")
+        if number < 1:
+            raise HTTPException(400, f"{name} must be a positive integer or null")
+        return number
+
+    token_limit = value("token_limit")
+    time_limit_s = value("time_limit_s")
+    conn = _conn()
+    try:
+        if not conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone():
+            raise HTTPException(404, "Session not found")
+        conn.execute("UPDATE sessions SET token_limit = ?, time_limit_s = ? WHERE id = ?",
+                     (token_limit, time_limit_s, session_id))
+        conn.commit()
+        row = conn.execute("SELECT id, token_limit, time_limit_s, token_used FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        return dict(row)
     finally:
         conn.close()
 
@@ -63,11 +120,22 @@ def list_sessions() -> list[dict]:
 def session_events(session_id: str, risk: str | None = None, limit: int = 500) -> list[dict]:
     conn = _conn()
     try:
-        sql = "SELECT * FROM events WHERE session_id = ?"
-        params: list = [session_id]
+        # session_id "all" means no session filter — the viewer's full-history load.
+        # tool IS NOT NULL excludes toolless lifecycle bookkeeping (SessionStart/
+        # End, Stop, PreCompact) — real audit rows, just not "actions" the
+        # timeline has a WHAT/WHY to show; they'd otherwise render as a bare
+        # "null" tool badge with nothing else in it.
+        where: list[str] = ["tool IS NOT NULL"]
+        params: list = []
+        if session_id != "all":
+            where.append("session_id = ?")
+            params.append(session_id)
         if risk:
-            sql += " AND risk = ?"
+            where.append("risk = ?")
             params.append(risk)
+        sql = "SELECT * FROM events"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY ts DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
@@ -89,6 +157,30 @@ def event_detail(event_id: int) -> dict | None:
 QUALIFIER_RE = re.compile(r"(\w+):(\S+)")
 
 
+def _day_to_ms(value: str) -> int | None:
+    """Parse a YYYY-MM-DD qualifier value to local-midnight epoch millis."""
+    try:
+        from datetime import datetime
+        return int(datetime.fromisoformat(value).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _fts_match(free_text: str) -> str:
+    """Quote each term so user punctuation can't be parsed as FTS5 operators;
+    the final term matches as a prefix for search-as-you-type."""
+    terms = [t.replace('"', '""') for t in free_text.split()]
+    return " ".join(f'"{t}"*' for t in terms)
+
+
+def _split_list(value: str) -> list[str]:
+    """The filter panel writes comma-separated OR-lists (risk:write,exec) and,
+    for tool, +-joined aliases within one element (bash+run_command). A
+    deliberately-empty selection is sent as the literal sentinel __none__,
+    which naturally matches nothing here — no special-casing needed."""
+    return [v for v in value.split(",") if v]
+
+
 @app.get("/api/search")
 def search(q: str = "", limit: int = 200) -> list[dict]:
     qualifiers = dict(QUALIFIER_RE.findall(q))
@@ -96,12 +188,12 @@ def search(q: str = "", limit: int = 200) -> list[dict]:
 
     conn = _conn()
     try:
-        conditions = []
+        conditions = ["tool IS NOT NULL"]
         params: list = []
 
         if free_text:
             fts_ids = conn.execute(
-                "SELECT rowid FROM events_fts WHERE events_fts MATCH ?", (free_text + "*",)
+                "SELECT rowid FROM events_fts WHERE events_fts MATCH ?", (_fts_match(free_text),)
             ).fetchall()
             ids = [r[0] for r in fts_ids]
             if not ids:
@@ -110,17 +202,49 @@ def search(q: str = "", limit: int = 200) -> list[dict]:
             params.extend(ids)
 
         if "risk" in qualifiers:
-            conditions.append("risk = ?")
-            params.append(qualifiers["risk"])
+            values = _split_list(qualifiers["risk"])
+            conditions.append("risk IN (%s)" % ",".join("?" for _ in values) if values else "0")
+            params.extend(values)
         if "tool" in qualifiers:
-            conditions.append("LOWER(tool) = LOWER(?)")
-            params.append(qualifiers["tool"])
+            tokens = [t for v in _split_list(qualifiers["tool"]) for t in v.split("+")]
+            if tokens:
+                sub = []
+                for t in tokens:
+                    if t.endswith("*"):
+                        sub.append("LOWER(tool) LIKE ?")
+                        params.append(t[:-1].lower() + "%")
+                    else:
+                        sub.append("LOWER(tool) = ?")
+                        params.append(t.lower())
+                conditions.append("(" + " OR ".join(sub) + ")")
+            else:
+                conditions.append("0")
+        if "kind" in qualifiers:
+            conditions.append("LOWER(tool_kind) = LOWER(?)")
+            params.append(qualifiers["kind"])
         if "session" in qualifiers:
-            conditions.append("session_id LIKE ?")
-            params.append(qualifiers["session"] + "%")
+            values = _split_list(qualifiers["session"])
+            if values:
+                conditions.append("(" + " OR ".join("session_id LIKE ?" for _ in values) + ")")
+                params.extend(v + "%" for v in values)
+            else:
+                conditions.append("0")
         if "file" in qualifiers:
             conditions.append("arguments_json LIKE ?")
             params.append(f"%{qualifiers['file']}%")
+        if "provider" in qualifiers:
+            conditions.append("LOWER(provider) = LOWER(?)")
+            params.append(qualifiers["provider"])
+        if "exit" in qualifiers:
+            # exit:fail finds every action that errored; exit:ok the inverse.
+            conditions.append("exit_ok = ?")
+            params.append(1 if qualifiers["exit"].lower() in {"ok", "pass", "success"} else 0)
+        if "after" in qualifiers and (after_ms := _day_to_ms(qualifiers["after"])) is not None:
+            conditions.append("ts >= ?")
+            params.append(after_ms)
+        if "before" in qualifiers and (before_ms := _day_to_ms(qualifiers["before"])) is not None:
+            conditions.append("ts < ?")
+            params.append(before_ms)
 
         sql = "SELECT * FROM events"
         if conditions:
@@ -134,6 +258,23 @@ def search(q: str = "", limit: int = 200) -> list[dict]:
         conn.close()
 
 
+@app.get("/api/recording")
+def get_recording() -> dict:
+    return {"paused": store.is_paused()}
+
+
+@app.post("/api/recording/pause")
+def pause_recording() -> dict:
+    store.set_paused(True)
+    return {"paused": True}
+
+
+@app.post("/api/recording/resume")
+def resume_recording() -> dict:
+    store.set_paused(False)
+    return {"paused": False}
+
+
 @app.get("/api/stream")
 async def stream():
     async def gen():
@@ -142,7 +283,7 @@ async def stream():
             last_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
             while True:
                 rows = conn.execute(
-                    "SELECT * FROM events WHERE id > ? ORDER BY id ASC", (last_id,)
+                    "SELECT * FROM events WHERE id > ? AND tool IS NOT NULL ORDER BY id ASC", (last_id,)
                 ).fetchall()
                 for row in rows:
                     d = _event_to_dict(row)
@@ -153,3 +294,20 @@ async def stream():
             conn.close()
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# The React viewer, mounted last so /api/* routes always win.
+# ponytail: repo-relative dist path; breaks for pip-installed wheels — package
+# the dist as data files if we ever ship one.
+DIST_DIR = Path(__file__).resolve().parents[2] / "viewer" / "dist"
+if DIST_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui")
+else:
+
+    @app.get("/")
+    def index() -> dict:
+        return {
+            "app": "flight-recorder",
+            "api": "/api/sessions",
+            "ui": "cd viewer && npm run build, or npm run dev (:5173 proxies /api)",
+        }

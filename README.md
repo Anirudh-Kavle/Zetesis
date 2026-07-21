@@ -1,108 +1,189 @@
 # Flight Recorder
 
-A local, real-time black box for coding-agent sessions. It captures each
-consequential tool action, binds it to the assistant context that preceded it,
-and preserves the evidence in SQLite plus an append-only JSONL mirror.
+A local, real-time black box for AI coding-agent sessions. It captures every
+consequential action (shell commands, file edits, network calls, account/
+credential operations) at the moment it happens, binds it to the reasoning
+that preceded it, and keeps everything in a local, append-only, greppable
+store — so "why did the agent do that?" is answerable forever, not just
+until the transcript compacts or auto-deletes.
 
-## F1/F2 status
+It works with three kinds of session, side by side in the same store:
 
-F1 action capture and F2 reasoning capture are implemented and tested:
+- **Claude Code** — via its native hook system
+- **Codex CLI** — via its native hook system
+- **The bundled API agent** (`fr api-ui`) — a small terminal coding agent
+  built directly on the OpenAI Responses API, for when you want a
+  Flight-Recorder-native agent instead of hooking into an existing CLI
 
-- Pre-action arguments and the post-action result are paired into one SQLite
-  row. Provider tool-call IDs are preferred; older hook payloads use the newest
-  unmatched action from the same session and tool.
-- Full tool arguments are retained. Large results are truncated at 16KB with an
-  explicit marker.
-- The reasoning parser tails at most 64KB of a live JSONL transcript, captures
-  assistant text/thinking before the current tool call, stops at the previous
-  tool result, and stores at most 8KB.
-- If the transcript is absent or unreadable, the action is still recorded with
-  `reasoning_text=NULL` and `capture_gap=1`.
-- A provider-neutral Python API is ready for an OpenAI-powered agent. The
-  recorder never reads or stores the model API key.
+All three write into the same SQLite store and show up together (or
+filtered by agent) in the viewer UI.
 
-Raw hook payloads are also mirrored to
-`~/.flight-recorder/debug/raw_payloads.jsonl` so the parser can be checked
-against the exact coding-agent version used in the demo.
+## Prerequisites
 
-## Install
+- Python 3.11+
+- Node 18+
+- git
 
-```text
-pip install -e .
-```
+## 1. Build and run
 
-## Claude Code hook usage
+```bash
+# Python package + `fr` / `fr-hook` CLI entry points
+pip install -e ".[dev]"
 
-```text
-cd your-project
+# Build the web viewer (fr ui serves the static build from viewer/dist)
+cd viewer && npm install && npm run build && cd ..
+# equivalently, from the repo root: npm install && npm run build
+
+# Create the local store at ~/.flight-recorder
 fr init
-fr status
+
+# Open the live timeline at http://127.0.0.1:7878
 fr ui
-fr grep <pattern>
 ```
 
-`fr init` merges the recorder hooks into the project's
-`.claude/settings.json`; it does not replace existing hooks.
+`fr ui` starts the FastAPI backend and opens the built viewer in your
+browser. Everything (SQLite DB, JSONL mirror, debug logs) lives under
+`~/.flight-recorder/` — there's no separate daemon to run.
 
-## API-backed coding agent
+### Frontend dev mode (hot reload, optional)
 
-Wrap every tool execution with the provider-neutral recorder. Supply only a
-genuine visible rationale or transcript excerpt; do not manufacture hidden
-chain-of-thought.
+Working on the viewer itself:
 
-```python
-from flight_recorder.recorder import FlightRecorder
-
-recorder = FlightRecorder(source="openai-api")
-action = recorder.start_action(
-    "shell",
-    {"command": "python -m unittest"},
-    reasoning_text="Run the local tests before editing code.",
-)
-
-try:
-    result = run_tool()  # your agent's tool implementation
-except Exception as exc:
-    action.finish({"error": str(exc)}, ok=False)
-    raise
-else:
-    action.finish(result, ok=True)
+```bash
+cd viewer
+npm run dev              # http://localhost:5173, proxies /api to :7878 — run `fr ui` alongside it
+# or, with no backend running at all:
+VITE_USE_MOCK=true npm run dev   # generated demo data, no store required
 ```
 
-The later OpenAI tool loop can use the Responses API for model/tool calls and
-this wrapper around each local tool. Audit content remains local.
+## 2. Recording sessions
 
-## Test
+Flight Recorder doesn't run as a daemon that watches your machine — each
+agent below is told (via its own hook or a wrapper) to call `fr-hook` at the
+right moments. Point any or all of them at the same project and their
+sessions all land in the same store, distinguished by provider.
 
-```text
-python -m unittest discover -v
+### Claude Code
+
+Create `.claude/settings.json` in the project (gitignored — per-machine
+config) registering `fr-hook --provider claude` as a command hook for each
+event you want captured:
+
+```json
+{
+  "hooks": {
+    "PreToolUse":  [{"matcher": ".*", "hooks": [{"type": "command", "command": "fr-hook --provider claude", "timeout": 5}]}],
+    "PostToolUse": [{"matcher": ".*", "hooks": [{"type": "command", "command": "fr-hook --provider claude", "timeout": 5}]}],
+    "SessionStart": [{"hooks": [{"type": "command", "command": "fr-hook --provider claude", "timeout": 5}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "fr-hook --provider claude", "timeout": 5}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "fr-hook --provider claude", "timeout": 5}]}]
+  }
+}
 ```
+
+Then just use Claude Code in that project — actions stream into the
+timeline live. (Don't add a `PermissionRequest` hook here: it fires
+alongside `PreToolUse`/`PostToolUse` for the same call with no way to pair
+it, so Flight Recorder ignores it rather than recording a duplicate row.)
+
+### Codex CLI
+
+```bash
+cd your-project
+fr init            # registers hooks in ./.codex/hooks.json (--global for ~/.codex/hooks.json)
+fr status          # check hooks + event counts
+```
+
+Then just use Codex in that project. Codex's `PreToolUse`/`PostToolUse`
+events preserve the exact raw `tool_name` and store a normalized
+`tool_kind` (`bash`, `edit`, `write`, `read`, `webfetch`, `mcp`, `other`);
+`tool_use_id` pairs each pre-action with its exact post-action result, even
+when identical tools run concurrently. Open `/hooks` in Codex once to
+review and trust the project hook commands.
+
+Coverage note: Codex hooks observe shell/unified-exec (`Bash`),
+`apply_patch`, MCP, and other local function tools. Hosted tools such as
+`WebSearch` don't use the local hook path and stay outside this recorder's
+coverage.
+
+### API agent (`fr api-ui`) — the built-in terminal agent
+
+A small interactive coding agent, wired straight into the same recorder, for
+when you'd rather not hook into an external CLI. Needs an OpenAI API key:
+
+```bash
+export OPENAI_API_KEY=sk-...      # or put it in .env / .env.local in the project root
+fr api-ui --token-limit 50000 --time-limit 600
+```
+
+Model defaults to `gpt-5.6`; override with `--model` or the `OPENAI_MODEL`
+env var. Inside the session:
+
+- `/help` — list commands
+- `/clear` — reset conversation context (recorded history is untouched)
+- `/status` — show recorder + hook status and the current token budget
+- `/quit` / `/exit` — leave
+
+Session guardrails: `--token-limit N`, `--time-limit SECONDS`, and
+`--daily-token-limit N`. When a limit is reached, no new API request is
+made and a `SessionLimit` event records the reason in the black box.
+Limits can also be edited live from the viewer's top bar while the terminal
+session is running — the agent picks up the change within a second.
+
+For a single non-interactive task instead of a REPL, use
+`fr agent "<task>" [same flags]`.
+
+## CLI reference
+
+```
+fr init  [--global]           register hooks (project by default) + create the store
+fr status                     store path, session/event counts, hook registration status
+fr ui    [--port] [--no-browser]   start the viewer and open it in a browser
+fr grep <pattern>             grep across the JSONL mirror
+fr agent <task> [...]         one-shot API-backed agent run
+fr api-ui [...]               interactive API-backed agent (see above)
+fr test-hook                  record a synthetic Pre/PostToolUse pair to confirm capture
+fr test-notification          test the desktop sensitive-action alert
+```
+
+Sensitive-risk events trigger a best-effort desktop alert before execution.
+Set `FLIGHT_RECORDER_NOTIFY=0` to disable alerts; notification failures
+never block the agent.
+
+## Viewer feature tour
+
+Sessions grouped by project (repo/folder) in the sidebar, with folder
+sub-groups for multiple checkouts; deterministic per-scope stat line
+(actions / commands / edits / failed / sensitive); full-database search with
+qualifiers (`tool:` `risk:` `file:` `session:` `exit:` `provider:` `after:`
+`before:`); per-session token/time budgets editable from the top bar;
+recording pause/resume.
 
 ## Layout
 
-- `flight_recorder/hook.py` - hook ingestion and pre/post action pairing
-- `flight_recorder/reasoning.py` - transcript tail parsing for F2
-- `flight_recorder/recorder.py` - provider-neutral API-agent instrumentation
-- `flight_recorder/store.py` - SQLite WAL store and JSONL mirror
-- `flight_recorder/schema.sql` - local schema and FTS index
-- `flight_recorder/viewer/` - FastAPI timeline viewer
-- `flight_recorder/cli.py` - `fr init|status|ui|grep`
+- `flight_recorder/hook.py` — the hook entry point every provider calls
+  (PreToolUse, PostToolUse, PreCompact, SessionStart, Stop, ...). Exits 0
+  unconditionally — a recorder that can break the agent's controls is worse
+  than no recorder.
+- `flight_recorder/reasoning.py` — extracts the reasoning window preceding
+  an action from the live transcript; PreCompact snapshot shield.
+- `flight_recorder/risk.py` + `risk_rules.yaml` — deterministic risk tiering.
+- `flight_recorder/agent.py` — the OpenAI Responses API agent loop behind
+  `fr agent` / `fr api-ui`.
+- `flight_recorder/store.py` — SQLite (WAL) + JSONL mirror, no daemon.
+- `flight_recorder/viewer/` — FastAPI app serving the API + the built React UI.
+- `flight_recorder/cli.py` — the `fr` command group.
 
-## Local data
+## Store location
 
-The default store is `~/.flight-recorder/`:
+`~/.flight-recorder/` — `recorder.db`, `events/YYYY-MM-DD.jsonl`,
+`snapshots/<session>/`, `debug/raw_payloads.jsonl`.
 
-- `recorder.db`
-- `events/YYYY-MM-DD.jsonl`
-- `snapshots/<session>/`
-- `debug/raw_payloads.jsonl`
+## Known gaps (honest, not hidden)
 
-## Known gaps
-
-- Representative Claude-style and function-call transcript records are tested,
-  but F2 must still be checked against real payloads from the exact agent build
-  used for the hackathon.
-- The OpenAI model/tool execution loop is intentionally the next slice; F1/F2 do
-  not need an API key to develop or test.
-- Incident reports, cross-session search polish, and file snapshot diffs are
-  stretch features.
+- Reasoning extraction (`flight_recorder/reasoning.py`) is defensive but
+  not exhaustively validated against every real transcript shape across
+  providers — raw hook payloads are always dumped to
+  `~/.flight-recorder/debug/raw_payloads.jsonl` for exactly that kind of
+  debugging.
+- No incident report export, multi-session cross-search, or file diffs yet.

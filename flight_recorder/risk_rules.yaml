@@ -1,8 +1,15 @@
 # Deterministic, table-driven risk classification. No LLM in the hot path.
 # Tiers, low to high severity: info < write < exec < network < sensitive
 # A tool gets its base tier from `tool_tiers`. Then `patterns` are checked
-# against the tool's command/args text; any match escalates to `sensitive`
-# and its `reason` is recorded.
+# against the tool's arguments AND its result text; each match escalates to
+# its own `tier` (default "sensitive" when omitted) and its `reason` is
+# recorded. The final tier is the highest of the tool's base tier and every
+# matched pattern's tier — never a downgrade.
+#
+# search_only_tools: tools whose entire argument IS a search query/pattern,
+# never an action (Grep/Glob/WebSearch). Patterns skip their ARGUMENTS —
+# searching *for* "sudo" isn't running it — but their RESULT is still
+# scanned normally, since what a search actually turns up is real content.
 
 tool_tiers:
   Read: info
@@ -13,10 +20,15 @@ tool_tiers:
   Write: write
   NotebookEdit: write
   Bash: exec
+  apply_patch: write
+  update_plan: info
+  view_image: info
   WebFetch: network
   WebSearch: network
 
 default_tier: exec  # unrecognized tools (e.g. mcp__*) default here
+
+search_only_tools: [Grep, Glob, WebSearch]
 
 patterns:
   - reason: "secret-like keyword"
@@ -26,7 +38,7 @@ patterns:
   - reason: "privilege escalation"
     regex: '(?i)\bsudo\b'
   - reason: "permissive chmod"
-    regex: 'chmod\s+7\d\d'
+    regex: 'chmod\s+(-\S+\s+)*7\d\d'
   - reason: "dotenv file"
     regex: '\.env\b'
   - reason: "account creation"
@@ -39,3 +51,4 @@ patterns:
     regex: '(?i)\b(keychain|Keychain\.app|security\s+find-generic-password)\b'
   - reason: "remote network tool in shell"
     regex: '(?i)\b(curl|wget|ssh|scp)\b'
+    tier: network

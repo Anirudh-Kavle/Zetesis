@@ -4,17 +4,35 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at INTEGER,
     cwd TEXT,
     git_repo TEXT,
-    source TEXT
+    source TEXT,
+    title TEXT,
+    token_limit INTEGER,
+    time_limit_s INTEGER,
+    token_used INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS api_usage (
+    day TEXT PRIMARY KEY,
+    token_count INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT REFERENCES sessions(id),
-    action_id TEXT,
     ts INTEGER NOT NULL,
-    completed_at INTEGER,
     phase TEXT NOT NULL,
     tool TEXT,
+    action_id TEXT,
+    completed_at INTEGER,
+    tool_kind TEXT,
+    tool_use_id TEXT,
+    turn_id TEXT,
+    provider TEXT,
+    model TEXT,
+    notification_sent INTEGER DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    usage_json TEXT,
     arguments_json TEXT,
     result_json TEXT,
     exit_ok INTEGER,
@@ -40,6 +58,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
 );
 
 CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
+    INSERT INTO events_fts(rowid, arguments_text, reasoning_text)
+    VALUES (new.id, new.arguments_json, new.reasoning_text);
+END;
+
+-- Keep FTS in sync when rows change after insert: result pairing at
+-- PostToolUse and the reasoning self-heal both UPDATE existing rows, and
+-- healed reasoning must be searchable.
+CREATE TRIGGER IF NOT EXISTS events_au AFTER UPDATE ON events BEGIN
+    INSERT INTO events_fts(events_fts, rowid, arguments_text, reasoning_text)
+    VALUES ('delete', old.id, old.arguments_json, old.reasoning_text);
     INSERT INTO events_fts(rowid, arguments_text, reasoning_text)
     VALUES (new.id, new.arguments_json, new.reasoning_text);
 END;
