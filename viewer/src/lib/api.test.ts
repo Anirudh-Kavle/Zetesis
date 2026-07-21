@@ -50,11 +50,15 @@ describe("normalizeEvent", () => {
       exit_ok: null,
     });
     expect(e.result_json).toBeUndefined();
-    expect(e.exit_ok).toBe(true); // pending must not render as failed
+    expect(e.exit_ok).toBeNull(); // unresolved must stay unresolved, not render as "ok"
   });
 
   it("maps failed post events to exit_ok false", () => {
     expect(normalizeEvent({ ...rawEvent, exit_ok: 0 }).exit_ok).toBe(false);
+  });
+
+  it("keeps git_dirty null when git status was unavailable, not clean", () => {
+    expect(normalizeEvent({ ...rawEvent, git_dirty: null }).git_dirty).toBeNull();
   });
 
   it("tolerates garbage and null files_touched", () => {
@@ -87,6 +91,7 @@ const rawSession = {
   cwd: "/Users/dev/project",
   git_repo: "project",
   source: "startup",
+  title: null,
 };
 
 describe("normalizeSession", () => {
@@ -108,5 +113,12 @@ describe("normalizeSession", () => {
     const s = normalizeSession({ ...rawSession, git_repo: null });
     expect(s.git_repo).toBeUndefined();
     expect(s.ended_at).toBeUndefined();
+  });
+
+  it("maps title onto label, the Claude Code sidebar name", () => {
+    expect(normalizeSession({ ...rawSession, title: "Brainstorm art contest project ideas" }).label).toBe(
+      "Brainstorm art contest project ideas",
+    );
+    expect(normalizeSession({ ...rawSession, title: null }).label).toBeUndefined();
   });
 });

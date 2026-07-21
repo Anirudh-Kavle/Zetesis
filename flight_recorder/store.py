@@ -43,16 +43,22 @@ def set_paused(paused: bool) -> None:
         PAUSE_FLAG.unlink(missing_ok=True)
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Add columns to pre-existing DBs from before this field existed.
-    CREATE TABLE IF NOT EXISTS (in init_db) never alters an existing table,
-    so installs from before tool_use_id was added need this to keep working."""
-    if not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'").fetchone():
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    if not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
         return  # fresh DB — init_db()'s schema.sql already has the column
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
-    if "tool_use_id" not in cols:
-        conn.execute("ALTER TABLE events ADD COLUMN tool_use_id TEXT")
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
         conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns to pre-existing DBs from before these fields existed.
+    CREATE TABLE IF NOT EXISTS (in init_db) never alters an existing table,
+    so installs from before tool_use_id/title were added need this to keep
+    working."""
+    _add_column_if_missing(conn, "events", "tool_use_id", "TEXT")
+    _add_column_if_missing(conn, "sessions", "title", "TEXT")
 
 
 def get_conn() -> sqlite3.Connection:
@@ -143,6 +149,18 @@ def add_daily_usage(conn: sqlite3.Connection, day: str, tokens: int, updated_at:
     )
 
 
+def session_needs_title(conn: sqlite3.Connection, session_id: str) -> bool:
+    """Whether this session still lacks the Claude Code sidebar title —
+    gates the hook from re-scanning the transcript on every single call once
+    the title's already been found."""
+    row = conn.execute("SELECT title FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    return row is not None and not row["title"]
+
+
+def set_session_title(conn: sqlite3.Connection, session_id: str, title: str) -> None:
+    conn.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+
+
 def find_pending_pre_event(conn: sqlite3.Connection, session_id: str, tool: str) -> sqlite3.Row | None:
     """The most recent unpaired 'pre' row for this session+tool, if any.
 
@@ -174,10 +192,17 @@ def find_pre_event_by_tool_use_id(
     ).fetchone()
 
 
-def update_event_result(conn: sqlite3.Connection, event_id: int, result_json: str, exit_ok: int | None) -> None:
+def update_event_result(
+    conn: sqlite3.Connection, event_id: int, result_json: str, exit_ok: int | None,
+    risk_tier: str, risk_reasons_json: str,
+) -> None:
+    """risk/risk_reasons are re-passed here (not just result_json/exit_ok)
+    because the row was first classified from arguments alone at PreToolUse
+    time — the result can carry its own risk signal (e.g. a secret in the
+    output) that only exists once the tool has actually run."""
     conn.execute(
-        "UPDATE events SET result_json = ?, exit_ok = ? WHERE id = ?",
-        (result_json, exit_ok, event_id),
+        "UPDATE events SET result_json = ?, exit_ok = ?, risk = ?, risk_reasons = ? WHERE id = ?",
+        (result_json, exit_ok, risk_tier, risk_reasons_json, event_id),
     )
 
 

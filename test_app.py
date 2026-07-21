@@ -23,6 +23,9 @@ def _seed(conn):
     conn.execute(
         "INSERT INTO sessions (id, started_at, ended_at, cwd, source) VALUES ('sess_b', 2000, 3000, '/tmp/b', 'resume')"
     )
+    conn.execute(
+        "INSERT INTO sessions (id, started_at, cwd, source, title) VALUES ('sess_c', 3000, '/tmp/c', 'startup', 'Brainstorm art contest project ideas')"
+    )
     events = [
         ("sess_a", 1100, "post", "Read", "read", 1, "exec"),
         ("sess_a", 1200, "post", "Bash", "bash", 0, "sensitive"),
@@ -98,6 +101,12 @@ def test_sessions_derive_project_from_repo_or_cwd(client):
     assert sessions["sess_a"]["project_key"] == "/tmp/a"
     assert sessions["sess_a"]["project"] == "a"
     assert sessions["sess_b"]["project"] == "b"
+
+
+def test_sessions_include_title_when_set(client):
+    sessions = {s["id"]: s["title"] for s in client.get("/api/sessions").json()}
+    assert sessions["sess_c"] == "Brainstorm art contest project ideas"
+    assert sessions["sess_a"] is None
 
 
 def test_root_serves_something(client):

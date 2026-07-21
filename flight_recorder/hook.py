@@ -7,6 +7,8 @@ to the debug log; nothing here may ever propagate to the agent.
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import sys
 import time
 
@@ -56,6 +58,56 @@ def _result_ok(response) -> int:
     return 1
 
 
+FILE_ARG_TOOLS = {"Edit", "Write", "NotebookEdit"}
+BASH_FILE_TOUCH_VERBS = {"rm", "mv", "cp", "touch", "mkdir"}
+_CHAIN_SPLIT_RE = re.compile(r"&&|\|\||;|\|")
+_REDIRECT_RE = re.compile(r">>?\s*([^\s>&|;]+)")
+
+
+def _bash_files_touched(command: str) -> list[str]:
+    """Best-effort file paths a Bash command touches — not a real shell
+    parser. Covers the common, straightforward cases (rm/mv/cp/touch/mkdir
+    and output redirects) across simple &&/;/| chains; anything more exotic
+    (globs, subshells, variable expansion, `find -exec`) is silently missed
+    rather than guessed at — an honest gap beats a wrong guess here too."""
+    paths: list[str] = []
+
+    for match in _REDIRECT_RE.finditer(command):
+        paths.append(match.group(1))
+
+    for segment in _CHAIN_SPLIT_RE.split(command):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue  # unbalanced quotes etc. — skip this segment, not the whole command
+        if not tokens:
+            continue
+        verb = tokens[0]
+        if verb == "sudo" and len(tokens) > 1:
+            verb, tokens = tokens[1], tokens[1:]
+        if verb in BASH_FILE_TOUCH_VERBS:
+            paths.extend(t for t in tokens[1:] if not t.startswith("-"))
+
+    return list(dict.fromkeys(paths))
+
+
+def _files_touched(tool_name: str | None, tool_input) -> str | None:
+    """Claude's Edit/Write/NotebookEdit and Bash get the richer handling
+    here; everything else (Codex's apply_patch, the API agent's
+    write_file/read_file) falls back to tools.py's provider-neutral version
+    so this doesn't regress coverage that already worked."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool_name in FILE_ARG_TOOLS:
+        path = tool_input.get("file_path") or tool_input.get("notebook_path")
+        return json.dumps([path]) if path else None
+    if tool_name == "Bash":
+        command = tool_input.get("command")
+        paths = _bash_files_touched(command) if isinstance(command, str) else []
+        return json.dumps(paths) if paths else None
+    return tools.files_touched(tool_name, tool_input)
+
+
 def _handle(payload: dict, provider: str | None = None) -> None:
     if store.is_paused():
         return
@@ -79,6 +131,11 @@ def _handle(payload: dict, provider: str | None = None) -> None:
         if hook_event_name == "SessionEnd":
             store.mark_session_ended(conn, session_id, ts)
 
+        if transcript_path and store.session_needs_title(conn, session_id):
+            title = reasoning.extract_session_title(transcript_path)
+            if title:
+                store.set_session_title(conn, session_id, title)
+
         if hook_event_name == "PreCompact":
             reasoning.snapshot_transcript(transcript_path, session_id, store.SNAPSHOTS_DIR)
 
@@ -98,7 +155,7 @@ def _handle(payload: dict, provider: str | None = None) -> None:
 
         risk_tier, risk_reasons = "info", []
         if tool_name:
-            risk_tier, risk_reasons = risk.classify(tool_name, arguments_text)
+            risk_tier, risk_reasons = risk.classify(tool_name, arguments_text, result_text)
 
         notification_sent = 0
         if phase == "pre" and risk_tier == "sensitive":
@@ -129,7 +186,7 @@ def _handle(payload: dict, provider: str | None = None) -> None:
             "git_branch": git.get("git_branch"),
             "git_head": git.get("git_head"),
             "git_dirty": git.get("git_dirty"),
-            "files_touched": tools.files_touched(tool_name, payload.get("tool_input")),
+            "files_touched": _files_touched(tool_name, payload.get("tool_input")),
         }
 
         pending = None
@@ -141,10 +198,19 @@ def _handle(payload: dict, provider: str | None = None) -> None:
                 pending = store.find_pending_pre_event(conn, session_id, tool_name)
 
         if pending is not None:
-            store.update_event_result(conn, pending["id"], event["result_json"], event["exit_ok"])
+            # risk_tier/risk_reasons above already reflect the result (this
+            # is a post-phase event, so result_text was already fed into the
+            # classify() call at the top) — the pending row was scored from
+            # arguments alone at PreToolUse time, so patch it up to match.
+            store.update_event_result(
+                conn, pending["id"], event["result_json"], event["exit_ok"],
+                risk_tier, event["risk_reasons"],
+            )
             merged = dict(pending)
             merged["result_json"] = event["result_json"]
             merged["exit_ok"] = event["exit_ok"]
+            merged["risk"] = risk_tier
+            merged["risk_reasons"] = event["risk_reasons"]
 
             # Self-heal: the PreToolUse capture can miss because the transcript
             # file hadn't been written past this call yet (the hook payload is

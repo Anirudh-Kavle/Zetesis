@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     cwd TEXT,
     git_repo TEXT,
     source TEXT,
+    title TEXT,
     token_limit INTEGER,
     time_limit_s INTEGER,
     token_used INTEGER NOT NULL DEFAULT 0,

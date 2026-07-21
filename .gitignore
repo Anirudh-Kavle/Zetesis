@@ -41,3 +41,7 @@ events/
 
 # Local Claude Code config (hooks are machine-specific)
 .claude/
+
+# Local scratch / experiments
+app.py
+scratch/

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FlightEvent } from "../types";
-import { eventSummary, reasoningFirstLine, shortSha, dayLabel } from "./format";
+import { eventSummary, reasoningFirstLine, shortSha, dayLabel, gitDirtySuffix, tokenizeJson, highlightJson } from "./format";
 import { parseQuery, filterEvents, activeQualifier } from "./search";
 
 const base: FlightEvent = {
@@ -55,6 +55,54 @@ describe("shortSha", () => {
   });
 });
 
+describe("gitDirtySuffix", () => {
+  it("flags dirty", () => {
+    expect(gitDirtySuffix(true)).toBe(" (dirty)");
+  });
+  it("stays silent when clean", () => {
+    expect(gitDirtySuffix(false)).toBe("");
+  });
+  it("says unknown instead of implying clean", () => {
+    expect(gitDirtySuffix(null)).toBe(" (dirty: unknown)");
+  });
+});
+
+describe("tokenizeJson", () => {
+  it("classifies keys, strings, numbers, booleans, and null", () => {
+    const text = '{\n  "cmd": "ls -la",\n  "n": 3,\n  "ok": true,\n  "x": null\n}';
+    const tokens = tokenizeJson(text);
+    expect(tokens.find((t) => t.text === '"cmd"')?.type).toBe("key");
+    expect(tokens.find((t) => t.text === '"ls -la"')?.type).toBe("string");
+    expect(tokens.find((t) => t.text === "3")?.type).toBe("number");
+    expect(tokens.find((t) => t.text === "true")?.type).toBe("boolean");
+    expect(tokens.find((t) => t.text === "null")?.type).toBe("null");
+  });
+
+  it("does not swallow the colon into the key token", () => {
+    const tokens = tokenizeJson('"a": "b"');
+    expect(tokens.map((t) => t.text).join("")).toBe('"a": "b"');
+    expect(tokens[0]).toEqual({ text: '"a"', type: "key" });
+  });
+
+  it("treats a string value containing a colon as a string, not a key", () => {
+    const tokens = tokenizeJson('"url": "http://x"');
+    const value = tokens.find((t) => t.text === '"http://x"');
+    expect(value?.type).toBe("string");
+  });
+
+  it("reassembles to the original text with no loss", () => {
+    const text = JSON.stringify({ a: [1, -2.5, "s"], b: null, c: false }, null, 2);
+    expect(tokenizeJson(text).map((t) => t.text).join("")).toBe(text);
+  });
+});
+
+describe("highlightJson", () => {
+  it("tokenizes JSON.stringify output of the given value", () => {
+    const tokens = highlightJson({ ok: true });
+    expect(tokens.map((t) => t.text).join("")).toBe(JSON.stringify({ ok: true }, null, 2));
+  });
+});
+
 describe("dayLabel", () => {
   it("labels today", () => {
     expect(dayLabel(Date.now())).toBe("today");
@@ -102,5 +150,18 @@ describe("filterEvents", () => {
   });
   it("free text matches command + reasoning", () => {
     expect(filterEvents(events, "useradd").map((e) => e.id)).toEqual([2]);
+  });
+  it("filters session: by raw session id substring", () => {
+    expect(filterEvents(events, "session:s1").map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(filterEvents(events, "session:nope")).toEqual([]);
+  });
+  it("filters session: by human-readable title, not just the raw id", () => {
+    // Regression: session: used to only ever match the raw UUID, so there
+    // was no way to find a session by the title shown in the sidebar.
+    const titles = new Map([["s1", "Brainstorm art contest project ideas"]]);
+    expect(filterEvents(events, "session:brainstorm", titles).map((e) => e.id)).toEqual([1, 2, 3]);
+  });
+  it("session: title match requires the title map — absent title falls back to id-only", () => {
+    expect(filterEvents(events, "session:brainstorm")).toEqual([]);
   });
 });
