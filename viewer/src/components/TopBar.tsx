@@ -38,7 +38,8 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
     const percent = sessionBudget ? Math.max(0, Math.min(100, remaining! / sessionBudget.limit * 100)) : 0;
     return (
       <header className="relative z-50 flex items-center gap-4 border-b border-border bg-surface/60 px-5 py-3 text-sm backdrop-blur">
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
+          <img src="/favicon.png" alt="" className="h-5 w-5 rounded-sm" />
           <span className="font-mono font-semibold tracking-tight text-ink">
             Zetesis
           </span>
