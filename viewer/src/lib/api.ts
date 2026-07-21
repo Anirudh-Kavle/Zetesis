@@ -14,6 +14,7 @@ interface RawEvent {
   phase: string;
   tool: string;
   provider: string | null;
+  turn_id: string | null;
   arguments_json: string | null;
   result_json: string | null;
   exit_ok: 0 | 1 | null;
@@ -83,6 +84,7 @@ export function normalizeEvent(raw: RawEvent): FlightEvent {
     phase: raw.phase as FlightEvent["phase"],
     tool: raw.tool,
     provider: normalizeProvider(raw.provider),
+    turn_id: raw.turn_id ?? undefined,
     arguments_json: looseJson(raw.arguments_json) ?? {},
     result_json: looseJson(raw.result_json),
     // ponytail: exit_ok null (in-flight pre event) maps to true so pending

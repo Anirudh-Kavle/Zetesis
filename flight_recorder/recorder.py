@@ -72,7 +72,7 @@ class FlightRecorder:
             conn.close()
 
     def start_action(self, tool: str, arguments: Any, *, reasoning_text: str | None = None,
-                     action_id: str | None = None) -> ActionHandle:
+                     action_id: str | None = None, turn_id: str | None = None) -> ActionHandle:
         """Capture full arguments plus a genuine visible/verbatim reasoning window."""
         ts = _now_ms()
         action_id = action_id or str(uuid.uuid4())
@@ -89,6 +89,7 @@ class FlightRecorder:
             "phase": "pre",
             "tool": tool,
             "tool_kind": tools.action_kind(tool, arguments),
+            "turn_id": turn_id,
             "provider": self.source,
             "model": self.model,
             "notification_sent": notification_sent,

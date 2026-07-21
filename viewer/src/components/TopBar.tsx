@@ -36,27 +36,37 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
     const remaining = sessionBudget ? Math.max(0, sessionBudget.limit - sessionBudget.used) : null;
     const percent = sessionBudget ? Math.max(0, Math.min(100, remaining! / sessionBudget.limit * 100)) : 0;
     return (
-      <header className="relative z-50 flex items-center gap-6 border-b border-border bg-surface/60 px-5 py-3 backdrop-blur">
-        <div className="flex items-center gap-3">
+      <header className="relative z-50 flex items-center gap-4 border-b border-border bg-surface/60 px-5 py-3 text-sm backdrop-blur">
+        <div className="flex shrink-0 items-center gap-3">
           <RecIndicator live={live} />
-          <span className="font-mono text-sm font-semibold tracking-tight text-ink">
+          <span className="font-mono font-semibold tracking-tight text-ink">
             Flight&nbsp;Recorder
           </span>
         </div>
-        <div className="relative flex items-center gap-2 text-xs text-muted" title={sessionBudget ? `${remaining!.toLocaleString()} tokens left in this session` : "No token limit selected"}>
-          <button type="button" className="flex items-center gap-2 rounded px-1 py-1 hover:bg-white/10" onClick={() => setEditing((v) => !v)}>
-          <span className="relative h-7 w-7 rounded-full" style={{ background: sessionBudget ? `conic-gradient(#60a5fa ${percent}%, #273244 ${percent}% 100%)` : "#273244" }}>
-            <span className="absolute inset-1 rounded-full bg-surface" />
-          </span>
-          <span className="whitespace-nowrap">
-            {sessionBudget ? `${remaining!.toLocaleString()} tokens left` : "Session budget not set"}
-            <span className="ml-2 text-muted/70">Today: {dailyTokens.toLocaleString()}</span>
-          </span>
+
+        <div className="min-w-0 flex-1">
+          <SearchBar ref={ref} value={search} onChange={onSearch} onClear={onClearSearch} sessions={sessions} agentFilter={agentFilter} />
+        </div>
+
+        <div className="relative flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setEditing((v) => !v)}
+            title={sessionBudget ? `${remaining!.toLocaleString()} tokens left in this session` : "No token limit selected"}
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-1.5 font-mono text-sm text-ink-muted transition-colors hover:border-ink-faint hover:text-ink"
+          >
+            <span className="relative h-4 w-4 shrink-0 rounded-full" style={{ background: sessionBudget ? `conic-gradient(#60a5fa ${percent}%, #273244 ${percent}% 100%)` : "#273244" }}>
+              <span className="absolute inset-[3px] rounded-full bg-surface" />
+            </span>
+            <span className="whitespace-nowrap">
+              {sessionBudget ? `${remaining!.toLocaleString()} left` : "Set budget"}
+            </span>
+            <span className="whitespace-nowrap text-ink-faint">· {dailyTokens.toLocaleString()} today</span>
           </button>
-          {editing && <form style={{ backgroundColor: "#10151d", opacity: 1 }} className="absolute left-0 top-10 z-[9999] w-80 rounded-lg border border-border p-4 shadow-2xl ring-1 ring-black/80" onSubmit={async (e) => { e.preventDefault(); setSaveError(""); try { await onBudgetSaved(tokens ? Number(tokens) : null, seconds ? Number(seconds) : null); setEditing(false); } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed"); } }}>
+          {editing && <form style={{ backgroundColor: "#10151d", opacity: 1 }} className="absolute right-0 top-10 z-[9999] w-80 rounded-lg border border-border p-4 shadow-2xl ring-1 ring-black/80" onSubmit={async (e) => { e.preventDefault(); setSaveError(""); try { await onBudgetSaved(tokens ? Number(tokens) : null, seconds ? Number(seconds) : null); setEditing(false); } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed"); } }}>
             <div className="mb-1 text-xs font-semibold text-ink">Session limits</div>
             <p className="mb-2 text-[11px] text-ink-faint">
-              Applies to the current Claude, Codex, and API session. Only the API agent actually stops itself when hit — Claude/Codex just show it as a recorded budget.
+              Applies to the current Claude, Codex, and API session. Only the API agent actually stops itself when hit. Claude/Codex just show it as a recorded budget.
             </p>
 
             <label className="mb-1 block text-xs">Token limit</label>
@@ -112,11 +122,8 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
             <button className="cursor-pointer rounded bg-blue-500 px-3 py-1 text-xs text-white hover:bg-blue-400" type="submit">Save limits</button>
             {saveError && <div className="mt-2 text-xs text-red-300">{saveError}</div>}
           </form>}
+          <RecordingToggle />
         </div>
-        <div className="flex-1">
-          <SearchBar ref={ref} value={search} onChange={onSearch} onClear={onClearSearch} sessions={sessions} agentFilter={agentFilter} />
-        </div>
-        <RecordingToggle />
       </header>
     );
   }

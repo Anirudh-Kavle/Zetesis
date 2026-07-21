@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -336,6 +337,10 @@ class ApiAgentSession:
             raise ValueError("max_steps must be at least 1")
         self._trim_context()
         self.inputs.append({"role": "user", "content": task})
+        # One turn_id per submitted task — every tool call this turn makes,
+        # across every step below, shares it, so the viewer can group
+        # "everything from this one prompt" together.
+        turn_id = str(uuid.uuid4())
 
         for _ in range(max_steps):
             reason = self._limit_reason()
@@ -378,7 +383,7 @@ class ApiAgentSession:
                     result, ok = {"error": f"invalid tool arguments: {exc}"}, False
                     action = self.recorder.start_action(
                         call.name, {"_raw_arguments": call.arguments},
-                        reasoning_text=response_summary, action_id=call.call_id,
+                        reasoning_text=response_summary, action_id=call.call_id, turn_id=turn_id,
                     )
                     action.finish(result, ok=ok)
                     self.inputs.append({"type": "function_call_output", "call_id": call.call_id,
@@ -389,7 +394,7 @@ class ApiAgentSession:
                 action = self.recorder.start_action(
                     call.name, raw_arguments,
                     reasoning_text=(reason if isinstance(reason, str) else None) or response_summary,
-                    action_id=call.call_id,
+                    action_id=call.call_id, turn_id=turn_id,
                 )
                 try:
                     result, ok = self.executor.execute(call.name, raw_arguments)

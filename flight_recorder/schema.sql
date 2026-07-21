@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     source TEXT,
     token_limit INTEGER,
     time_limit_s INTEGER,
-    token_used INTEGER NOT NULL DEFAULT 0
+    token_used INTEGER NOT NULL DEFAULT 0,
+    current_turn_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS api_usage (

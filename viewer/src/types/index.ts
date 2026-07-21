@@ -10,6 +10,7 @@ export interface FlightEvent {
   phase: "pre" | "post" | "compact" | "session";
   tool: string;
   provider: Provider; // which agent's hook recorded this event
+  turn_id?: string; // groups every action from the same single prompt/turn
   arguments_json: Record<string, unknown>;
   result_json?: Record<string, unknown>;
   exit_ok: boolean;

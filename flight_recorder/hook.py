@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+import uuid
 
 from . import gitstate, notifier, reasoning, risk, store, tools
 
@@ -79,6 +80,14 @@ def _handle(payload: dict, provider: str | None = None) -> None:
         if hook_event_name == "SessionEnd":
             store.mark_session_ended(conn, session_id, ts)
 
+        # Claude Code's payloads never carry their own per-turn id (Codex's
+        # sometimes do, via payload["turn_id"] below). A new prompt — or a
+        # fresh/resumed session before any prompt lands — starts a new turn
+        # that every tool call in between gets stamped with, so the viewer
+        # can group "everything from one prompt" together.
+        if hook_event_name in ("UserPromptSubmit", "SessionStart"):
+            store.set_session_turn(conn, session_id, str(uuid.uuid4()))
+
         if hook_event_name == "PreCompact":
             reasoning.snapshot_transcript(transcript_path, session_id, store.SNAPSHOTS_DIR)
 
@@ -115,7 +124,10 @@ def _handle(payload: dict, provider: str | None = None) -> None:
             "tool": tool_name,
             "tool_kind": tools.action_kind(tool_name, payload.get("tool_input")),
             "tool_use_id": payload.get("tool_use_id"),
-            "turn_id": payload.get("turn_id"),
+            # Codex's own payload sometimes already carries a turn_id — trust
+            # that when present; otherwise fall back to the one this hook
+            # mints itself on UserPromptSubmit/SessionStart (see above).
+            "turn_id": payload.get("turn_id") or store.get_session_turn(conn, session_id),
             "provider": _provider(payload, provider),
             "model": payload.get("model"),
             "notification_sent": notification_sent,

@@ -77,7 +77,7 @@ def init_db() -> None:
             if name not in columns:
                 conn.execute(f"ALTER TABLE events ADD COLUMN {name} TEXT")
         session_columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
-        for name, definition in (("token_limit", "INTEGER"), ("time_limit_s", "INTEGER"), ("token_used", "INTEGER NOT NULL DEFAULT 0")):
+        for name, definition in (("token_limit", "INTEGER"), ("time_limit_s", "INTEGER"), ("token_used", "INTEGER NOT NULL DEFAULT 0"), ("current_turn_id", "TEXT")):
             if name not in session_columns:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {definition}")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_tool_kind ON events(tool_kind)")
@@ -110,6 +110,22 @@ def upsert_session(conn: sqlite3.Connection, session_id: str, ts: int, cwd: str 
 
 def mark_session_ended(conn: sqlite3.Connection, session_id: str, ts: int) -> None:
     conn.execute("UPDATE sessions SET ended_at = ? WHERE id = ?", (ts, session_id))
+
+
+def set_session_turn(conn: sqlite3.Connection, session_id: str, turn_id: str) -> None:
+    """Record the id of the turn currently in progress for this session.
+
+    Claude Code's hook payloads carry no per-turn identifier of their own
+    (unlike Codex, which sometimes does), so the hook mints one itself on
+    every UserPromptSubmit/SessionStart and every subsequent tool-use event
+    in that session is stamped with whatever this currently holds — that's
+    what lets the viewer group "everything from one prompt" together."""
+    conn.execute("UPDATE sessions SET current_turn_id = ? WHERE id = ?", (turn_id, session_id))
+
+
+def get_session_turn(conn: sqlite3.Connection, session_id: str) -> str | None:
+    row = conn.execute("SELECT current_turn_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    return row["current_turn_id"] if row else None
 
 
 def update_session_usage(conn: sqlite3.Connection, session_id: str, tokens: int) -> None:
