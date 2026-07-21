@@ -40,8 +40,15 @@ const KIND_NOUN: Record<ToolKind, string> = {
   other: "action",
 };
 
-function kindLabel(kind: ToolKind, count: number): string {
-  return `${KIND_VERB[kind]} ${count} ${KIND_NOUN[kind]}${count > 1 ? "s" : ""}`;
+// "Explored 4 files" tells you nothing you can act on; naming the actual
+// files/commands/URLs does. Shows up to `max` concrete summaries, then a
+// "+N more" tail — the heading itself is the useful part, not a placeholder
+// you have to expand to decode.
+function withNames(prefix: string, summaries: string[], max = 2): string {
+  if (summaries.length === 0) return prefix;
+  const shown = summaries.slice(0, max).join(", ");
+  const more = summaries.length > max ? ` +${summaries.length - max} more` : "";
+  return `${prefix} ${shown}${more}`;
 }
 
 // Fallback clustering window for events with no turn_id recorded (older rows
@@ -56,8 +63,8 @@ export interface EventGroup {
 
 export interface GroupSummary {
   badge: string; // short badge text for the collapsed row — a ToolKind, or "turn" when the group mixes kinds
-  label: string; // e.g. "Explored 4 files" or "6 actions (3 files, 2 commands, 1 URL)"
-  preview: string; // distinct summaries touched, so skimming doesn't require expanding
+  label: string; // e.g. "Explored config/deploy.yaml, README.md +2 more" — concrete, not a generic count
+  preview: string; // kind breakdown for mixed groups ("3 files, 1 command, 1 URL"); empty for uniform-kind groups, where the label already says everything
 }
 
 // risk:sensitive events never join a group and never let anything else join
@@ -100,12 +107,13 @@ export function summarizeGroup(events: FlightEvent[]): GroupSummary {
     counts.set(k, (counts.get(k) ?? 0) + 1);
   }
   const summaries = [...new Set(events.map(eventSummary))].filter(Boolean);
-  const preview = summaries.length > 3 ? `${summaries.slice(0, 3).join(", ")} +${summaries.length - 3} more` : summaries.join(", ");
 
   if (counts.size === 1) {
     const [kind] = counts.keys();
-    return { badge: kind, label: kindLabel(kind, events.length), preview };
+    const label = withNames(KIND_VERB[kind], summaries, 3);
+    return { badge: kind, label, preview: "" };
   }
   const parts = [...counts.entries()].map(([k, n]) => `${n} ${KIND_NOUN[k]}${n > 1 ? "s" : ""}`);
-  return { badge: "turn", label: `${events.length} actions (${parts.join(", ")})`, preview };
+  const label = withNames(`${events.length} actions:`, summaries, 2);
+  return { badge: "turn", label, preview: parts.join(", ") };
 }
