@@ -53,8 +53,11 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
             <span className="ml-2 text-muted/70">Today: {dailyTokens.toLocaleString()}</span>
           </span>
           </button>
-          {editing && sessionBudget && <form style={{ backgroundColor: "#10151d", opacity: 1 }} className="absolute left-0 top-10 z-[9999] w-80 rounded-lg border border-border p-4 shadow-2xl ring-1 ring-black/80" onSubmit={async (e) => { e.preventDefault(); setSaveError(""); try { await onBudgetSaved(tokens ? Number(tokens) : null, seconds ? Number(seconds) : null); setEditing(false); } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed"); } }}>
-            <div className="mb-2 text-xs font-semibold text-ink">Session limits</div>
+          {editing && <form style={{ backgroundColor: "#10151d", opacity: 1 }} className="absolute left-0 top-10 z-[9999] w-80 rounded-lg border border-border p-4 shadow-2xl ring-1 ring-black/80" onSubmit={async (e) => { e.preventDefault(); setSaveError(""); try { await onBudgetSaved(tokens ? Number(tokens) : null, seconds ? Number(seconds) : null); setEditing(false); } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed"); } }}>
+            <div className="mb-1 text-xs font-semibold text-ink">Session limits</div>
+            <p className="mb-2 text-[11px] text-ink-faint">
+              Applies to the current Claude, Codex, and API session. Only the API agent actually stops itself when hit — Claude/Codex just show it as a recorded budget.
+            </p>
 
             <label className="mb-1 block text-xs">Token limit</label>
             <input

@@ -12,7 +12,7 @@ import { Timeline } from "./components/Timeline";
 import { DetailDrawer } from "./components/DetailDrawer";
 import { EmptyState } from "./components/EmptyState";
 import { Pagination } from "./components/Pagination";
-import type { Provider } from "./lib/agents";
+import { PROVIDERS, type Provider } from "./lib/agents";
 
 const PAGE_SIZE = 50;
 
@@ -106,13 +106,31 @@ export default function App() {
         onClearSearch={() => setSearch("")}
         sessions={scopedSessions}
         agentFilter={agentFilter}
-        sessionBudget={(() => { const s = sessions.find((x) => x.token_limit); return s?.token_limit ? { id: s.id, used: s.token_used ?? 0, limit: s.token_limit, timeLimit: s.time_limit_s } : undefined; })()}
+        sessionBudget={(() => {
+          const s = sessions.find((x) => x.live && x.token_limit) ?? sessions.find((x) => x.token_limit);
+          return s?.token_limit ? { id: s.id, used: s.token_used ?? 0, limit: s.token_limit, timeLimit: s.time_limit_s } : undefined;
+        })()}
         dailyTokens={dailyTokens}
         onBudgetSaved={async (tokenLimit, timeLimit) => {
-          const s = sessions.find((x) => x.token_limit);
-          if (!s) return;
-          await updateBudget(s.id, tokenLimit, timeLimit);
-          setSessions((all) => all.map((x) => x.id === s.id ? { ...x, token_limit: tokenLimit ?? undefined, time_limit_s: timeLimit ?? undefined } : x));
+          // Applies to every agent's own current session — the live one if
+          // it has one running, otherwise its most recent — not just
+          // whichever single session the header happens to be displaying.
+          // This is a recorded budget only: flight_recorder's hook can't stop
+          // Claude Code or Codex mid-session, so for them it's informational
+          // (shown as a ring/countdown), not enforced. Only the bundled API
+          // agent (agent.py) actually checks it and refuses to continue.
+          const targets = PROVIDERS.map((p) => {
+            const providerSessions = sessions.filter((s) => s.provider === p);
+            return providerSessions.find((s) => s.live) ?? providerSessions[0];
+          }).filter((s): s is Session => Boolean(s));
+          if (targets.length === 0) return;
+          await Promise.all(targets.map((s) => updateBudget(s.id, tokenLimit, timeLimit)));
+          const ids = new Set(targets.map((s) => s.id));
+          setSessions((all) =>
+            all.map((x) =>
+              ids.has(x.id) ? { ...x, token_limit: tokenLimit ?? undefined, time_limit_s: timeLimit ?? undefined } : x
+            )
+          );
         }}
       />
 
