@@ -1,6 +1,6 @@
 import type { FlightEvent, Session } from "../types";
 import { mockEvents, mockSessions, generateMockEvent } from "./mockData";
-import { filterEvents } from "./search";
+import { filterEvents, sessionTitleMap } from "./search";
 import * as api from "./api";
 
 // Single adapter behind the whole UI. Live (:7878 via the vite proxy) by
@@ -37,7 +37,7 @@ const mockSource: DataSource = {
     return mockEvents.find((e) => e.id === id);
   },
   async search(query) {
-    return filterEvents(mockEvents, query);
+    return filterEvents(mockEvents, query, sessionTitleMap(mockSessions));
   },
   subscribe(onEvent) {
     const timer = setInterval(() => {
