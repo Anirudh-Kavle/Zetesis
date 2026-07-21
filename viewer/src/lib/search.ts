@@ -1,4 +1,4 @@
-import type { FlightEvent } from "../types";
+import type { FlightEvent, Session } from "../types";
 import { eventSummary } from "./format";
 
 export interface ParsedQuery {
@@ -45,7 +45,18 @@ function splitList(value: string): string[] {
   return value.split(",").map((v) => v.trim()).filter(Boolean);
 }
 
-export function filterEvents(events: FlightEvent[], q: string): FlightEvent[] {
+// session: can match either the raw id or the human-readable sidebar title
+// (the one Claude Code itself generates) — build once per session list and
+// pass through so filtering doesn't need to look sessions up per event.
+export function sessionTitleMap(sessions: Session[]): Map<string, string> {
+  return new Map(sessions.filter((s) => s.label).map((s) => [s.id, s.label!]));
+}
+
+export function filterEvents(
+  events: FlightEvent[],
+  q: string,
+  sessionTitles?: Map<string, string>
+): FlightEvent[] {
   const p = parseQuery(q);
   return events.filter((e) => {
     if (p.tool) {
@@ -57,8 +68,11 @@ export function filterEvents(events: FlightEvent[], q: string): FlightEvent[] {
     if (p.risk && !splitList(p.risk).includes(e.risk)) return false;
     if (p.provider && e.provider.toLowerCase() !== p.provider) return false;
     if (p.session) {
-      const lower = e.session_id.toLowerCase();
-      if (!splitList(p.session).some((s) => lower.includes(s))) return false;
+      const terms = splitList(p.session);
+      const idLower = e.session_id.toLowerCase();
+      const title = sessionTitles?.get(e.session_id)?.toLowerCase();
+      const match = terms.some((s) => idLower.includes(s) || (title ? title.includes(s) : false));
+      if (!match) return false;
     }
     if (p.file) {
       const files = (e.files_touched ?? []).join(" ").toLowerCase();

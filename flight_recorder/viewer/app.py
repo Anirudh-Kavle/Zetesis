@@ -42,7 +42,7 @@ def list_sessions() -> list[dict]:
         # edit/bash counts also fall back to the raw tool name.
         rows = conn.execute(
             """
-            SELECT s.id, s.started_at, s.ended_at, s.cwd, s.git_repo, s.source,
+            SELECT s.id, s.started_at, s.ended_at, s.cwd, s.git_repo, s.source, s.title,
                    s.token_limit, s.time_limit_s, s.token_used,
                    COUNT(e.id) as event_count, MAX(e.ts) as last_event_ts,
                    COUNT(e.id) FILTER (WHERE e.tool IS NOT NULL) AS action_count,

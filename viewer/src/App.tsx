@@ -5,7 +5,7 @@ import { getUsage, updateBudget } from "./lib/api";
 import { useEventStream } from "./hooks/useEventStream";
 import { useKeyboardNav } from "./hooks/useKeyboardNav";
 import { byNewest } from "./lib/format";
-import { filterEvents } from "./lib/search";
+import { filterEvents, sessionTitleMap } from "./lib/search";
 import { TopBar } from "./components/TopBar";
 import { SessionSidebar, projectKeyOf, projectNameOf } from "./components/SessionSidebar";
 import { Timeline } from "./components/Timeline";
@@ -48,6 +48,10 @@ export default function App() {
     () => (agentFilter ? sessions.filter((s) => s.provider === agentFilter) : sessions),
     [sessions, agentFilter]
   );
+
+  // session: qualifier matches either the raw id or Claude Code's own
+  // human-readable session title.
+  const sessionTitles = useMemo(() => sessionTitleMap(sessions), [sessions]);
 
   // Switching agent scope away from whatever's selected (session, folder, or
   // project group) clears that selection rather than silently showing an
@@ -127,9 +131,9 @@ export default function App() {
     if (agentFilter) list = list.filter((e) => e.provider === agentFilter);
     if (selectedSession) list = list.filter((e) => e.session_id === selectedSession);
     else if (scopeSessionIds) list = list.filter((e) => scopeSessionIds.has(e.session_id));
-    if (searching && !remoteResults) list = filterEvents(list, search);
+    if (searching && !remoteResults) list = filterEvents(list, search, sessionTitles);
     return [...list].sort(byNewest);
-  }, [agentScopedEvents, remoteResults, agentFilter, selectedSession, scopeSessionIds, search, searching]);
+  }, [agentScopedEvents, remoteResults, agentFilter, selectedSession, scopeSessionIds, search, searching, sessionTitles]);
 
   // Changing scope (agent/session/project/search) invalidates the current page.
   useEffect(() => {
