@@ -87,7 +87,7 @@ def _handle(payload: dict) -> None:
 
         risk_tier, risk_reasons = "info", []
         if tool_name:
-            risk_tier, risk_reasons = risk.classify(tool_name, arguments_text)
+            risk_tier, risk_reasons = risk.classify(tool_name, arguments_text, result_text)
 
         exit_ok = None
         if phase == "post":
@@ -119,10 +119,19 @@ def _handle(payload: dict) -> None:
         pending = store.find_pending_pre_event(conn, session_id, tool_name) if phase == "post" and tool_name else None
 
         if pending is not None:
-            store.update_event_result(conn, pending["id"], event["result_json"], event["exit_ok"])
+            # risk_tier/risk_reasons above already reflect the result (this
+            # is a post-phase event, so result_text was already fed into the
+            # classify() call at the top) — the pending row was scored from
+            # arguments alone at PreToolUse time, so patch it up to match.
+            store.update_event_result(
+                conn, pending["id"], event["result_json"], event["exit_ok"],
+                risk_tier, event["risk_reasons"],
+            )
             merged = dict(pending)
             merged["result_json"] = event["result_json"]
             merged["exit_ok"] = event["exit_ok"]
+            merged["risk"] = risk_tier
+            merged["risk_reasons"] = event["risk_reasons"]
 
             # Self-heal: the PreToolUse capture can miss because the transcript
             # file hadn't been written past this call yet (the hook payload is

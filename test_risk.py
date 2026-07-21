@@ -87,3 +87,64 @@ def test_pattern_reasons_are_case_insensitive():
     tier, reasons = risk.classify("Bash", _args("SUDO apt install foo"))
     assert tier == "sensitive"
     assert "privilege escalation" in reasons
+
+
+def test_curl_in_shell_escalates_to_network_not_sensitive():
+    # Regression: this pattern used to force "sensitive" like every other
+    # pattern, so "network" activity done via shell was indistinguishable
+    # from an actually dangerous action (secrets, destructive delete, etc).
+    tier, reasons = risk.classify("Bash", _args("curl https://api.example.com/data"))
+    assert tier == "network"
+    assert "remote network tool in shell" in reasons
+
+
+def test_a_genuinely_sensitive_pattern_still_outranks_network():
+    # curl AND a secret in the same command — sensitive must win, since the
+    # final tier is the highest matched, never a downgrade.
+    tier, reasons = risk.classify("Bash", _args("curl -H 'Authorization: token abc' https://x"))
+    assert tier == "sensitive"
+    assert "remote network tool in shell" in reasons
+    assert "secret-like keyword" in reasons
+
+
+def test_grep_searching_for_a_risky_word_is_not_flagged():
+    # Regression: Grep's entire argument is a search pattern — searching FOR
+    # "sudo" or "password" is a benign audit action, not the action itself.
+    tier, reasons = risk.classify("Grep", '{"pattern": "sudo"}')
+    assert tier == "info"
+    assert reasons == []
+
+    tier, reasons = risk.classify("Grep", '{"pattern": "password"}')
+    assert tier == "info"
+    assert reasons == []
+
+
+def test_glob_and_websearch_are_also_exempt_from_argument_matching():
+    assert risk.classify("Glob", '{"pattern": "**/*rm -rf*"}') == ("info", [])
+    assert risk.classify("WebSearch", '{"query": "how sudo works"}') == ("network", [])
+
+
+def test_grep_result_containing_a_real_secret_is_still_flagged():
+    # The exemption is for the QUERY, not the RESULT — if Grep's output
+    # actually surfaces a hardcoded secret, that's real content, not intent.
+    tier, reasons = risk.classify(
+        "Grep", '{"pattern": "API_KEY"}', result_text='config.py:3:API_KEY = "sk-abc123"'
+    )
+    assert tier == "sensitive"
+    assert "secret-like keyword" in reasons
+
+
+def test_bash_result_containing_a_secret_escalates_even_with_clean_arguments():
+    tier, reasons = risk.classify(
+        "Bash", _args("cat config.py"), result_text='API_KEY = "sk-abc123"'
+    )
+    assert tier == "sensitive"
+    assert "secret-like keyword" in reasons
+
+
+def test_duplicate_reason_from_args_and_result_is_not_repeated():
+    tier, reasons = risk.classify(
+        "Bash", _args("echo my password"), result_text="password: hunter2"
+    )
+    assert tier == "sensitive"
+    assert reasons.count("secret-like keyword") == 1
