@@ -136,6 +136,51 @@ def test_post_tool_use_heals_a_gap_once_the_transcript_catches_up(isolated_store
     assert count == 1
 
 
+def test_risk_is_reclassified_once_the_result_reveals_a_secret(isolated_store, tmp_path):
+    # The PreToolUse row is scored from arguments alone ("cat config.py"
+    # looks clean) — the tool hasn't run yet, so there's no result to scan.
+    # By PostToolUse time the actual output is known, and if IT contains
+    # something like a hardcoded secret, the stored row must be upgraded,
+    # not left at whatever the clean-looking request implied.
+    transcript_path = tmp_path / "session.jsonl"
+    _write_transcript(transcript_path, [_user_prompt("cat the config")])
+
+    pre_payload = {
+        "hook_event_name": "PreToolUse",
+        "session_id": "sess1",
+        "cwd": str(tmp_path),
+        "transcript_path": str(transcript_path),
+        "tool_name": "Bash",
+        "tool_input": {"command": "cat config.py"},
+        "tool_use_id": "toolu_1",
+    }
+    hook._handle(pre_payload)
+
+    conn = store.get_conn()
+    row = conn.execute("SELECT * FROM events WHERE tool='Bash'").fetchone()
+    conn.close()
+    assert row["risk"] == "exec"
+    assert row["risk_reasons"] == "[]"
+
+    post_payload = dict(
+        pre_payload,
+        hook_event_name="PostToolUse",
+        tool_response={"stdout": 'API_KEY = "sk-abc123"'},
+    )
+    hook._handle(post_payload)
+
+    conn = store.get_conn()
+    healed = conn.execute("SELECT * FROM events WHERE tool='Bash'").fetchone()
+    conn.close()
+    assert healed["risk"] == "sensitive"
+    assert "secret-like keyword" in healed["risk_reasons"]
+    # Still exactly one row — healed in place, not duplicated.
+    conn = store.get_conn()
+    count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    conn.close()
+    assert count == 1
+
+
 def test_opportunistic_heal_recovers_a_gap_when_post_tool_use_never_fires(isolated_store, tmp_path):
     # Regression for the real incident: Claude Code sometimes never fires
     # PostToolUse at all (seen with a malformed command), so the pairing

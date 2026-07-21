@@ -127,10 +127,17 @@ def find_pending_pre_event(conn: sqlite3.Connection, session_id: str, tool: str)
     ).fetchone()
 
 
-def update_event_result(conn: sqlite3.Connection, event_id: int, result_json: str, exit_ok: int | None) -> None:
+def update_event_result(
+    conn: sqlite3.Connection, event_id: int, result_json: str, exit_ok: int | None,
+    risk_tier: str, risk_reasons_json: str,
+) -> None:
+    """risk/risk_reasons are re-passed here (not just result_json/exit_ok)
+    because the row was first classified from arguments alone at PreToolUse
+    time — the result can carry its own risk signal (e.g. a secret in the
+    output) that only exists once the tool has actually run."""
     conn.execute(
-        "UPDATE events SET result_json = ?, exit_ok = ? WHERE id = ?",
-        (result_json, exit_ok, event_id),
+        "UPDATE events SET result_json = ?, exit_ok = ?, risk = ?, risk_reasons = ? WHERE id = ?",
+        (result_json, exit_ok, risk_tier, risk_reasons_json, event_id),
     )
 
 
