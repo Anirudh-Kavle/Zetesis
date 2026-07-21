@@ -7,6 +7,8 @@ to the debug log; nothing here may ever propagate to the agent.
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import sys
 import time
 
@@ -36,13 +38,49 @@ def _truncate(obj, max_len: int = 16 * 1024) -> tuple[str, bool]:
 
 
 FILE_ARG_TOOLS = {"Edit", "Write", "NotebookEdit"}
+BASH_FILE_TOUCH_VERBS = {"rm", "mv", "cp", "touch", "mkdir"}
+_CHAIN_SPLIT_RE = re.compile(r"&&|\|\||;|\|")
+_REDIRECT_RE = re.compile(r">>?\s*([^\s>&|;]+)")
+
+
+def _bash_files_touched(command: str) -> list[str]:
+    """Best-effort file paths a Bash command touches — not a real shell
+    parser. Covers the common, straightforward cases (rm/mv/cp/touch/mkdir
+    and output redirects) across simple &&/;/| chains; anything more exotic
+    (globs, subshells, variable expansion, `find -exec`) is silently missed
+    rather than guessed at — an honest gap beats a wrong guess here too."""
+    paths: list[str] = []
+
+    for match in _REDIRECT_RE.finditer(command):
+        paths.append(match.group(1))
+
+    for segment in _CHAIN_SPLIT_RE.split(command):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue  # unbalanced quotes etc. — skip this segment, not the whole command
+        if not tokens:
+            continue
+        verb = tokens[0]
+        if verb == "sudo" and len(tokens) > 1:
+            verb, tokens = tokens[1], tokens[1:]
+        if verb in BASH_FILE_TOUCH_VERBS:
+            paths.extend(t for t in tokens[1:] if not t.startswith("-"))
+
+    return list(dict.fromkeys(paths))
 
 
 def _files_touched(tool_name: str | None, tool_input) -> str | None:
-    if tool_name not in FILE_ARG_TOOLS or not isinstance(tool_input, dict):
+    if not isinstance(tool_input, dict):
         return None
-    path = tool_input.get("file_path") or tool_input.get("notebook_path")
-    return json.dumps([path]) if path else None
+    if tool_name in FILE_ARG_TOOLS:
+        path = tool_input.get("file_path") or tool_input.get("notebook_path")
+        return json.dumps([path]) if path else None
+    if tool_name == "Bash":
+        command = tool_input.get("command")
+        paths = _bash_files_touched(command) if isinstance(command, str) else []
+        return json.dumps(paths) if paths else None
+    return None
 
 
 def _handle(payload: dict) -> None:

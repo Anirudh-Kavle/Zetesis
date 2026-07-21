@@ -55,6 +55,71 @@ def _tool_result():
     return {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "hi"}]}}
 
 
+def test_bash_files_touched_covers_rm_mv_cp_touch_mkdir():
+    # Regression: file: search used to be blind to Bash entirely — only
+    # Edit/Write/NotebookEdit ever populated files_touched, so `rm`/`mv`/`cp`
+    # never showed up no matter what you searched for.
+    assert hook._bash_files_touched("rm file.txt") == ["file.txt"]
+    assert hook._bash_files_touched("rm -rf node_modules") == ["node_modules"]
+    assert hook._bash_files_touched("mv a.txt b.txt") == ["a.txt", "b.txt"]
+    assert hook._bash_files_touched("cp -r src dst") == ["src", "dst"]
+    assert hook._bash_files_touched("touch new.py") == ["new.py"]
+    assert hook._bash_files_touched("mkdir -p some/nested/dir") == ["some/nested/dir"]
+
+
+def test_bash_files_touched_covers_redirects():
+    assert hook._bash_files_touched("echo hi > out.txt") == ["out.txt"]
+    assert hook._bash_files_touched("echo hi >> out.txt") == ["out.txt"]
+
+
+def test_bash_files_touched_ignores_flags():
+    assert hook._bash_files_touched("rm -rf --no-preserve-root /tmp/x") == ["/tmp/x"]
+
+
+def test_bash_files_touched_handles_chained_commands():
+    assert hook._bash_files_touched("cd /tmp && rm file.txt") == ["file.txt"]
+    assert hook._bash_files_touched("rm a.txt; rm b.txt") == ["a.txt", "b.txt"]
+
+
+def test_bash_files_touched_strips_leading_sudo():
+    assert hook._bash_files_touched("sudo rm -rf /var/log/app.log") == ["/var/log/app.log"]
+
+
+def test_bash_files_touched_respects_quoted_paths():
+    assert hook._bash_files_touched("rm 'my file.txt'") == ["my file.txt"]
+
+
+def test_bash_files_touched_deduplicates():
+    assert hook._bash_files_touched("rm a.txt a.txt") == ["a.txt"]
+
+
+def test_bash_files_touched_ignores_non_file_commands():
+    assert hook._bash_files_touched("ls -la") == []
+    assert hook._bash_files_touched("cat file1 | grep foo") == []
+    assert hook._bash_files_touched('git commit -m "fix: something"') == []
+
+
+def test_bash_files_touched_survives_unbalanced_quotes():
+    # Best-effort, not a real shell parser — malformed input must not crash
+    # the hook, just skip that segment.
+    assert hook._bash_files_touched("rm 'unterminated") == []
+
+
+def test_files_touched_populated_end_to_end_for_a_bash_command(isolated_store, tmp_path):
+    hook._handle({
+        "hook_event_name": "PreToolUse",
+        "session_id": "sess1",
+        "cwd": str(tmp_path),
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf node_modules"},
+        "tool_use_id": "toolu_1",
+    })
+    conn = store.get_conn()
+    row = conn.execute("SELECT files_touched FROM events WHERE tool='Bash'").fetchone()
+    conn.close()
+    assert json.loads(row["files_touched"]) == ["node_modules"]
+
+
 def test_migration_adds_tool_use_id_to_a_pre_existing_db(tmp_path, monkeypatch):
     # Simulates a real install from before tool_use_id existed: the events
     # table has no such column. get_conn() must upgrade it transparently —

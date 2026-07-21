@@ -1,4 +1,4 @@
-import type { FlightEvent } from "../types";
+import type { FlightEvent, Session } from "../types";
 import { eventSummary } from "./format";
 
 export interface ParsedQuery {
@@ -32,12 +32,26 @@ export function activeQualifier(q: string): string | null {
   return m && (QUALIFIERS as readonly string[]).includes(m[1]) ? m[1] : null;
 }
 
-export function filterEvents(events: FlightEvent[], q: string): FlightEvent[] {
+// session: can match either the raw id or the human-readable sidebar title.
+export function sessionTitleMap(sessions: Session[]): Map<string, string> {
+  return new Map(sessions.filter((s) => s.label).map((s) => [s.id, s.label!]));
+}
+
+export function filterEvents(
+  events: FlightEvent[],
+  q: string,
+  sessionTitles?: Map<string, string>
+): FlightEvent[] {
   const p = parseQuery(q);
   return events.filter((e) => {
     if (p.tool && e.tool.toLowerCase() !== p.tool) return false;
     if (p.risk && e.risk !== p.risk) return false;
-    if (p.session && !e.session_id.toLowerCase().includes(p.session)) return false;
+    if (p.session) {
+      const idMatch = e.session_id.toLowerCase().includes(p.session);
+      const title = sessionTitles?.get(e.session_id);
+      const titleMatch = title ? title.toLowerCase().includes(p.session) : false;
+      if (!idMatch && !titleMatch) return false;
+    }
     if (p.file) {
       const files = (e.files_touched ?? []).join(" ").toLowerCase();
       if (!files.includes(p.file)) return false;

@@ -4,7 +4,7 @@ import { dataSource } from "./lib/dataSource";
 import { useEventStream } from "./hooks/useEventStream";
 import { useKeyboardNav } from "./hooks/useKeyboardNav";
 import { byNewest } from "./lib/format";
-import { filterEvents } from "./lib/search";
+import { filterEvents, sessionTitleMap } from "./lib/search";
 import { TopBar } from "./components/TopBar";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { Timeline } from "./components/Timeline";
@@ -28,14 +28,16 @@ export default function App() {
   const live = sessions.some((s) => s.live);
   const searching = search.trim().length > 0;
 
+  const sessionTitles = useMemo(() => sessionTitleMap(sessions), [sessions]);
+
   // Filter pipeline: session scope → risk filter → search. Newest-first for the timeline.
   const visible = useMemo(() => {
     let list = events;
     if (selectedSession) list = list.filter((e) => e.session_id === selectedSession);
     list = list.filter((e) => riskFilter.has(e.risk));
-    if (searching) list = filterEvents(list, search);
+    if (searching) list = filterEvents(list, search, sessionTitles);
     return [...list].sort(byNewest);
-  }, [events, selectedSession, riskFilter, search, searching]);
+  }, [events, selectedSession, riskFilter, search, searching, sessionTitles]);
 
   const selectedEvent = drawerOpen
     ? events.find((e) => e.id === selectedId) ?? null

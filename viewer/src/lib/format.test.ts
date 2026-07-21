@@ -150,4 +150,17 @@ describe("filterEvents", () => {
   it("free text matches command + reasoning", () => {
     expect(filterEvents(events, "useradd").map((e) => e.id)).toEqual([2]);
   });
+  it("filters session: by raw session id substring", () => {
+    expect(filterEvents(events, "session:s1").map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(filterEvents(events, "session:nope")).toEqual([]);
+  });
+  it("filters session: by human-readable title, not just the raw id", () => {
+    // Regression: session: used to only ever match the raw UUID, so there
+    // was no way to find a session by the title shown in the sidebar.
+    const titles = new Map([["s1", "Brainstorm art contest project ideas"]]);
+    expect(filterEvents(events, "session:brainstorm", titles).map((e) => e.id)).toEqual([1, 2, 3]);
+  });
+  it("session: title match requires the title map — absent title falls back to id-only", () => {
+    expect(filterEvents(events, "session:brainstorm")).toEqual([]);
+  });
 });
