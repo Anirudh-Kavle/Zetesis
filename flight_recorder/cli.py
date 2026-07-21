@@ -19,7 +19,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 TOOL_HOOK_EVENTS = ["PreToolUse", "PostToolUse"]
 BARE_HOOK_EVENTS = [
-    "PreCompact", "PostCompact", "SessionStart", "SubagentStart",
+    "PreCompact", "PostCompact", "SessionStart", "SessionEnd", "SubagentStart",
     "SubagentStop", "UserPromptSubmit", "Stop",
 ]
 
