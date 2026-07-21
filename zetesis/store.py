@@ -189,15 +189,22 @@ def add_daily_usage(conn: sqlite3.Connection, day: str, tokens: int, updated_at:
 
 
 def session_needs_title(conn: sqlite3.Connection, session_id: str) -> bool:
-    """Whether this session still lacks the Claude Code sidebar title —
-    gates the hook from re-scanning the transcript on every single call once
-    the title's already been found."""
+    """Whether this session still lacks a sidebar title — gates the hook
+    from re-deriving one on every single call once it's already been found."""
     row = conn.execute("SELECT title FROM sessions WHERE id = ?", (session_id,)).fetchone()
     return row is not None and not row["title"]
 
 
 def set_session_title(conn: sqlite3.Connection, session_id: str, title: str) -> None:
     conn.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+
+
+def title_from_text(text: str, max_len: int = 80) -> str:
+    """First line of a prompt/task, capped for the sidebar — the fallback
+    title source for Codex and the API agent, neither of which write a
+    Claude-style "ai-title" transcript entry for extract_session_title()."""
+    first_line = text.strip().splitlines()[0].strip()
+    return first_line if len(first_line) <= max_len else first_line[:max_len - 1].rstrip() + "…"
 
 
 def get_budget(conn: sqlite3.Connection, scope: str) -> sqlite3.Row | None:

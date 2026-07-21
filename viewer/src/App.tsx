@@ -50,7 +50,6 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  const live = sessions.some((s) => s.live);
   const searching = search.trim().length > 0;
 
   // Sessions scoped to the selected agent — drives the sidebar's project tree
@@ -187,7 +186,6 @@ export default function App() {
     <div className="flex h-full flex-col">
       <TopBar
         ref={searchRef}
-        live={live}
         search={search}
         onSearch={setSearch}
         onClearSearch={() => setSearch("")}

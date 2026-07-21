@@ -121,22 +121,27 @@ def _usage_tokens(payload: dict) -> int:
     return 0
 
 
-def _prompt_tokens(payload: dict) -> int:
-    """Estimate submitted-prompt tokens when a native hook exposes text.
-
-    Claude/Codex lifecycle hooks do not consistently include provider usage,
-    so this deterministic estimate is intentionally labeled as such in the
-    event payload. Four characters is a conservative, model-agnostic proxy.
-    """
+def _prompt_text(payload: dict) -> str | None:
+    """Raw submitted-prompt text when a native hook payload exposes it —
+    Claude/Codex lifecycle hooks don't use a consistent key for this."""
     for key in ("prompt", "user_prompt", "prompt_text", "message", "content"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return max(1, (len(value.strip()) + 3) // 4)
+            return value.strip()
         if isinstance(value, dict):
             text = value.get("text") or value.get("content")
             if isinstance(text, str) and text.strip():
-                return max(1, (len(text.strip()) + 3) // 4)
-    return 0
+                return text.strip()
+    return None
+
+
+def _prompt_tokens(payload: dict) -> int:
+    """Estimate submitted-prompt tokens when a native hook exposes text.
+
+    Four characters is a conservative, model-agnostic proxy.
+    """
+    text = _prompt_text(payload)
+    return max(1, (len(text) + 3) // 4) if text else 0
 
 
 def _handle(payload: dict, provider: str | None = None) -> None:
@@ -177,6 +182,14 @@ def _handle(payload: dict, provider: str | None = None) -> None:
             title = reasoning.extract_session_title(transcript_path)
             if title:
                 store.set_session_title(conn, session_id, title)
+
+        # Codex has no transcript-embedded title the way Claude Code does —
+        # fall back to the first submitted prompt, the same text already
+        # read above for token estimation.
+        if hook_event_name == "UserPromptSubmit" and store.session_needs_title(conn, session_id):
+            prompt_text = _prompt_text(payload)
+            if prompt_text:
+                store.set_session_title(conn, session_id, store.title_from_text(prompt_text))
 
         # Claude Code's payloads never carry their own per-turn id (Codex's
         # sometimes do, via payload["turn_id"] below). A new prompt — or a

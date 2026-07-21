@@ -366,6 +366,14 @@ class ApiAgentSession:
             raise ValueError("task cannot be empty")
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
+
+        conn = store.get_conn()
+        try:
+            if store.session_needs_title(conn, self.recorder.session_id):
+                store.set_session_title(conn, self.recorder.session_id, store.title_from_text(task))
+                conn.commit()
+        finally:
+            conn.close()
         self._trim_context()
         self.inputs.append({"role": "user", "content": task})
         # One turn_id per submitted task — every tool call this turn makes,

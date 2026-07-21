@@ -2,12 +2,10 @@ import { forwardRef, useEffect, useState } from "react";
 import type { Session } from "../types";
 import type { Provider } from "../lib/agents";
 import type { BudgetSetting } from "../lib/api";
-import { RecIndicator } from "./RecIndicator";
 import { RecordingToggle } from "./RecordingToggle";
 import { SearchBar } from "./SearchBar";
 
 interface Props {
-  live: boolean;
   search: string;
   onSearch: (v: string) => void;
   onClearSearch: () => void;
@@ -20,7 +18,7 @@ interface Props {
 }
 
 export const TopBar = forwardRef<HTMLInputElement, Props>(
-  ({ live, search, onSearch, onClearSearch, sessions, agentFilter, sessionBudget, dailyTokens, budgets, onBudgetSaved }, ref) => {
+  ({ search, onSearch, onClearSearch, sessions, agentFilter, sessionBudget, dailyTokens, budgets, onBudgetSaved }, ref) => {
     const [editing, setEditing] = useState(false);
     const [tokens, setTokens] = useState(sessionBudget?.limit ? String(sessionBudget.limit) : "");
     const [seconds, setSeconds] = useState(sessionBudget?.timeLimit?.toString() ?? "");
@@ -41,9 +39,8 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
     return (
       <header className="relative z-50 flex items-center gap-4 border-b border-border bg-surface/60 px-5 py-3 text-sm backdrop-blur">
         <div className="flex shrink-0 items-center gap-3">
-          <RecIndicator live={live} />
           <span className="font-mono font-semibold tracking-tight text-ink">
-            Flight&nbsp;Recorder
+            Zetesis
           </span>
         </div>
 

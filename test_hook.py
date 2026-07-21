@@ -150,6 +150,46 @@ def test_permission_request_does_not_duplicate_the_paired_event(isolated_store, 
     assert rows[0]["exit_ok"] == 1
 
 
+def test_codex_session_gets_a_title_from_the_first_prompt(isolated_store, tmp_path):
+    # Regression: only Claude Code writes an "ai-title" transcript entry, so
+    # extract_session_title() always came back empty for Codex/API sessions
+    # and the sidebar fell back to showing the raw session id. Codex's
+    # UserPromptSubmit carries the prompt text itself — use that instead.
+    hook._handle({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "sess-codex",
+        "cwd": str(tmp_path),
+        "prompt": "fix the login bug\nsecond line should be ignored",
+    })
+    conn = store.get_conn()
+    row = conn.execute("SELECT title FROM sessions WHERE id = 'sess-codex'").fetchone()
+    conn.close()
+    assert row["title"] == "fix the login bug"
+
+
+def test_existing_claude_title_is_not_overwritten_by_the_prompt_fallback(isolated_store, tmp_path):
+    hook._handle({
+        "hook_event_name": "SessionStart",
+        "session_id": "sess-claude",
+        "cwd": str(tmp_path),
+    })
+    conn = store.get_conn()
+    store.set_session_title(conn, "sess-claude", "Claude's own title")
+    conn.commit()
+    conn.close()
+
+    hook._handle({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "sess-claude",
+        "cwd": str(tmp_path),
+        "prompt": "this should never appear as the title",
+    })
+    conn = store.get_conn()
+    row = conn.execute("SELECT title FROM sessions WHERE id = 'sess-claude'").fetchone()
+    conn.close()
+    assert row["title"] == "Claude's own title"
+
+
 def test_migration_adds_tool_use_id_to_a_pre_existing_db(tmp_path, monkeypatch):
     # Simulates a real install from before tool_use_id existed: the events
     # table has no such column. get_conn() must upgrade it transparently —
