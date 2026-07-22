@@ -23,3 +23,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["zetesis*"]
+
+[tool.setuptools.package-data]
+zetesis = ["*.txt", "*.sql", "*.yaml"]

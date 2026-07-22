@@ -162,6 +162,7 @@ fr init  [--global]           register hooks (project by default) + create the s
 fr status                     store path, session/event counts, hook registration status
 fr ui    [--port] [--no-browser]   start the viewer and open it in a browser
 fr grep <pattern>             grep across the JSONL mirror
+fr export [-o <path>]         write today's canonical events to a JSON file
 fr agent <task> [...]         one-shot API-backed agent run
 fr api-ui [...]               interactive API-backed agent (see above)
 fr test-hook                  record a synthetic Pre/PostToolUse pair to confirm capture

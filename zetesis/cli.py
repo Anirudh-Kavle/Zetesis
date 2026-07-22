@@ -10,6 +10,7 @@ import time
 import textwrap
 import threading
 import webbrowser
+from datetime import date, datetime, time as datetime_time, timedelta
 from pathlib import Path
 
 from . import limits, store
@@ -211,6 +212,31 @@ def cmd_grep(args: argparse.Namespace) -> None:
             for line in handle:
                 if pattern.search(line):
                     sys.stdout.write(f"{path.name}: {line}")
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    """Write the local-calendar-day's canonical event rows as a JSON array."""
+    if not store.DB_PATH.exists():
+        print("Not initialized. Run `fr init` first.")
+        return
+
+    today = date.today()
+    day_start = int(datetime.combine(today, datetime_time.min).astimezone().timestamp() * 1000)
+    next_day_start = int(datetime.combine(today + timedelta(days=1), datetime_time.min).astimezone().timestamp() * 1000)
+
+    conn = store.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE ts >= ? AND ts < ? ORDER BY ts, id",
+            (day_start, next_day_start),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    output = args.output or Path.cwd() / f"zetesis-{today.isoformat()}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps([dict(row) for row in rows], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Exported {len(rows)} event(s) to {output}")
 
 
 def cmd_test_hook(args: argparse.Namespace) -> None:
@@ -527,6 +553,10 @@ def main() -> None:
     p_grep = sub.add_parser("grep", help="grep across the JSONL mirror")
     p_grep.add_argument("pattern")
     p_grep.set_defaults(func=cmd_grep)
+
+    p_export = sub.add_parser("export", help="Write today's events to a JSON file")
+    p_export.add_argument("-o", "--output", type=Path, help="Destination JSON file")
+    p_export.set_defaults(func=cmd_export)
 
     p_test = sub.add_parser("test-hook", help="Smoke-test exact Codex hook payloads")
     p_test.set_defaults(func=cmd_test_hook)
