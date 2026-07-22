@@ -35,6 +35,9 @@ events/
 # Local hook config (machine-specific paths)
 .claude/settings.json
 
+# Secrets
+.env
+
 # OS
 .DS_Store
 

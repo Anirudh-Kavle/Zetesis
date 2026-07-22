@@ -109,6 +109,7 @@ fr init      # wires Flight Recorder into your agent, creates the store
 fr status    # recorder installed? events flowing? last event age
 fr ui        # opens the live timeline at http://127.0.0.1:7878
 fr grep rm   # grep across the plaintext JSONL mirror
+fr export    # write today's canonical events to flight-recorder-YYYY-MM-DD.json
 ```
 
 Then just run your agent in that project. Actions stream into the timeline

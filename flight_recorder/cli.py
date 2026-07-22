@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import webbrowser
+from datetime import date, datetime, time as datetime_time, timedelta
 from pathlib import Path
 
 from . import store
@@ -13,6 +15,35 @@ from . import store
 # Windows consoles default to cp1252, which can't encode the REC dot etc.
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+# Calvin S figlet wordmark. Box-drawing chars keep it to 3 rows / ~42 cols.
+_ART = [
+    "╔═╗╦  ╦╔═╗╦ ╦╔╦╗  ╦═╗╔═╗╔═╗╔═╗╦═╗╔╦╗╔═╗╦═╗",
+    "╠╣ ║  ║║ ╦╠═╣ ║   ╠╦╝║╣ ║  ║ ║╠╦╝ ║║║╣ ╠╦╝",
+    "╚  ╩═╝╩╚═╝╩ ╩ ╩   ╩╚═╚═╝╚═╝╚═╝╩╚══╩╝╚═╝╩╚═",
+]
+
+# The banner "face": viewer/public/thinking.png rendered to ASCII by
+# scratch/thinking2ascii.py. Bundled as text (no Pillow at runtime).
+_MONKEY_PATH = Path(__file__).resolve().parent / "monkey.txt"
+
+
+def _monkey() -> str:
+    return _MONKEY_PATH.read_text(encoding="utf-8").rstrip("\n")
+
+
+def _color(code: str, text: str) -> str:
+    # NO_COLOR (https://no-color.org) and non-tty output both mean plain text.
+    if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def banner() -> str:
+    monkey = _color("32", _monkey())          # matrix green
+    art = "\n".join(_color("92", line) for line in _ART)  # bright green
+    tag = f"  {_color('91', '●')} local audit trail for Claude Code sessions"
+    return f"\n{monkey}\n\n{art}\n{tag}\n"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HOOK_ENTRY = PROJECT_ROOT / "bin" / "fr_hook_entry.py"
@@ -79,6 +110,7 @@ def _hooks_registered(settings: dict, command: str) -> bool:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
+    print(banner())
     store.ensure_dirs()
     store.init_db()
 
@@ -159,6 +191,31 @@ def cmd_grep(args: argparse.Namespace) -> None:
                     sys.stdout.write(f"{path.name}: {line}")
 
 
+def cmd_export(args: argparse.Namespace) -> None:
+    """Write the local-calendar-day's canonical event rows as a JSON array."""
+    if not store.DB_PATH.exists():
+        print("Not initialized. Run `fr init` first.")
+        return
+
+    today = date.today()
+    day_start = int(datetime.combine(today, datetime_time.min).astimezone().timestamp() * 1000)
+    next_day_start = int(datetime.combine(today + timedelta(days=1), datetime_time.min).astimezone().timestamp() * 1000)
+
+    conn = store.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE ts >= ? AND ts < ? ORDER BY ts, id",
+            (day_start, next_day_start),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    output = args.output or Path.cwd() / f"flight-recorder-{today.isoformat()}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps([dict(row) for row in rows], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Exported {len(rows)} event(s) to {output}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="fr", description="Flight Recorder CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -179,6 +236,10 @@ def main() -> None:
     p_grep = sub.add_parser("grep", help="grep across the JSONL mirror")
     p_grep.add_argument("pattern")
     p_grep.set_defaults(func=cmd_grep)
+
+    p_export = sub.add_parser("export", help="Write today's events to a JSON file")
+    p_export.add_argument("-o", "--output", type=Path, help="Destination JSON file")
+    p_export.set_defaults(func=cmd_export)
 
     args = parser.parse_args()
     args.func(args)
