@@ -67,7 +67,7 @@ export function Timeline({ events, loading, selectedId, lastArrivalId, onSelect,
       {paused && newCount > 0 && (
         <button
           onClick={backToLive}
-          className="fr-slide-in absolute left-1/2 top-3 z-10 -translate-x-1/2 cursor-pointer rounded-full border border-border bg-surface-2 px-3 py-1 font-mono text-xs text-ink shadow-lg transition-colors hover:border-rec"
+          className="fr-slide-in absolute left-1/2 top-3 z-10 -translate-x-1/2 cursor-pointer rounded-full border border-rec bg-rec/10 px-3 py-1.5 font-mono text-xs text-rec shadow-lg shadow-rec/20 transition-all duration-200 hover:bg-rec/20 hover:shadow-lg active:scale-95"
         >
           ⏸ paused — {newCount} new ↑
         </button>

@@ -30,7 +30,7 @@ export function Pagination({ page, totalPages, onChange }: Props) {
         type="button"
         onClick={() => onChange(page - 1)}
         disabled={page <= 1}
-        className="rounded px-2 py-1 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
+        className="rounded px-2.5 py-1.5 transition-all duration-200 hover:bg-surface/80 hover:text-ink hover:border-border active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
       >
         ‹ Prev
       </button>
@@ -48,8 +48,8 @@ export function Pagination({ page, totalPages, onChange }: Props) {
             aria-current={p === page ? "page" : undefined}
             className={
               p === page
-                ? "rounded bg-risk-write/20 px-2.5 py-1 text-ink"
-                : "rounded px-2.5 py-1 hover:bg-white/10"
+                ? "rounded bg-risk-write/20 px-2.5 py-1.5 text-risk-write font-semibold ring-1 ring-risk-write/40 transition-all duration-200"
+                : "rounded px-2.5 py-1.5 transition-all duration-200 hover:bg-surface/80 hover:text-ink active:scale-95"
             }
           >
             {p}
@@ -61,7 +61,7 @@ export function Pagination({ page, totalPages, onChange }: Props) {
         type="button"
         onClick={() => onChange(page + 1)}
         disabled={page >= totalPages}
-        className="rounded px-2 py-1 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
+        className="rounded px-2.5 py-1.5 transition-all duration-200 hover:bg-surface/80 hover:text-ink hover:border-border active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
       >
         Next ›
       </button>

@@ -54,9 +54,9 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
             type="button"
             onClick={() => setEditing((v) => !v)}
             title={sessionBudget ? `${remaining!.toLocaleString()} tokens left in this session` : "No token limit selected"}
-            className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-1.5 font-mono text-sm text-ink-muted transition-colors hover:border-ink-faint hover:text-ink"
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-1.5 font-mono text-sm text-ink-muted transition-all duration-200 hover:border-rec hover:text-rec hover:bg-surface/40 active:scale-95"
           >
-            <span className="relative h-4 w-4 shrink-0 rounded-full" style={{ background: sessionBudget ? `conic-gradient(#60a5fa ${percent}%, #273244 ${percent}% 100%)` : "#273244" }}>
+            <span className="relative h-4 w-4 shrink-0 rounded-full" style={{ background: sessionBudget ? `conic-gradient(rgb(15, 165, 233) ${percent}%, rgb(39, 50, 68) ${percent}% 100%)` : "rgb(39, 50, 68)" }}>
               <span className="absolute inset-[3px] rounded-full bg-surface" />
             </span>
             <span className="whitespace-nowrap">
@@ -64,7 +64,7 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
             </span>
             <span className="whitespace-nowrap text-ink-faint">· {dailyTokens.toLocaleString()} today</span>
           </button>
-          {editing && <form style={{ backgroundColor: "#10151d", opacity: 1 }} className="absolute right-0 top-10 z-[9999] w-80 rounded-lg border border-border p-4 shadow-2xl ring-1 ring-black/80" onSubmit={async (e) => { e.preventDefault(); setSaveError(""); try { await onBudgetSaved("openai-api", tokens ? Number(tokens) : null, seconds ? Number(seconds) : null); setEditing(false); } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed"); } }}>
+          {editing && <form className="absolute right-0 top-10 z-9999 w-80 rounded-lg border border-border bg-surface-2 p-4 shadow-2xl ring-1 ring-rec/10" onSubmit={async (e) => { e.preventDefault(); setSaveError(""); try { await onBudgetSaved("openai-api", tokens ? Number(tokens) : null, seconds ? Number(seconds) : null); setEditing(false); } catch (err) { setSaveError(err instanceof Error ? err.message : "Save failed"); } }}>
             <div className="mb-1 text-xs font-semibold text-ink">API token budget</div>
             <div className="mb-2 rounded border border-border-soft bg-black/20 px-2 py-1.5 text-[11px] text-ink-faint">
               {selectedBudget?.token_limit == null
@@ -125,8 +125,8 @@ export const TopBar = forwardRef<HTMLInputElement, Props>(
               ))}
             </div>
 
-            <button className="cursor-pointer rounded bg-blue-500 px-3 py-1 text-xs text-white hover:bg-blue-400" type="submit">Save limits</button>
-            {saveError && <div className="mt-2 text-xs text-red-300">{saveError}</div>}
+            <button className="cursor-pointer rounded bg-risk-write px-3 py-1.5 text-xs font-medium text-white transition-all duration-200 hover:bg-blue-500 active:scale-95" type="submit">Save limits</button>
+            {saveError && <div className="mt-2 text-xs text-risk-sensitive">{saveError}</div>}
           </form>}
           <RecordingToggle />
         </div>

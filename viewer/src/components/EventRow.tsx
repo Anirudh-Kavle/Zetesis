@@ -22,11 +22,11 @@ export function EventRow({ event, selected, isNew, onClick }: Props) {
       onClick={onClick}
       aria-pressed={selected}
       className={[
-        "group block w-full cursor-pointer border-l-2 px-4 py-2.5 text-left transition-colors",
+        "group block w-full cursor-pointer border-l-2 px-4 py-2.5 text-left transition-all duration-150",
         isNew ? "fr-slide-in" : "",
         selected
-          ? "border-l-ink bg-surface-2"
-          : "border-l-transparent hover:border-l-border hover:bg-surface/70",
+          ? "border-l-rec bg-surface-2 shadow-lg shadow-rec/5"
+          : "border-l-transparent hover:border-l-border hover:bg-surface/50 active:bg-surface-2",
       ].join(" ")}
     >
       <div className="flex items-center gap-3">
