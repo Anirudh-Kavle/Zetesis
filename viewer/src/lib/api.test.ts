@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeEvent, normalizeSession } from "./api";
+import { normalizeEvent, normalizeSession, normalizeStats } from "./api";
 
 // Raw wire shapes as the FastAPI backend actually sends them.
 const rawEvent = {
@@ -121,5 +121,51 @@ describe("normalizeSession", () => {
       "Brainstorm art contest project ideas",
     );
     expect(normalizeSession({ ...rawSession, title: null }).label).toBeUndefined();
+  });
+});
+
+const rawStats = {
+  has_any_events: true,
+  recording_paused: false,
+  days: 14,
+  coverage: {
+    capture_health: "healthy" as const,
+    gap_rate_recent: 0.1,
+    gap_rate_prior: 0.05,
+    compaction_shields_fired: 2,
+    providers: [{ provider: "claude" as const, last_event_ts: 1_752_700_000_000, active: true, event_count_window: 5 }],
+  },
+  cards: {
+    sensitive_this_week: 1,
+    sensitive_prior_week: 0,
+    actions_total: 10,
+    actions_window: 5,
+    reasoning_coverage_pct: 0.9,
+    files_touched_distinct: 3,
+    files_touched_outside_git: 1,
+  },
+  risk_by_day: [{ date: "2026-07-28", info: 1, write: 0, exec: 0, network: 0, sensitive: 0 }],
+  most_touched_files: [{ path: "a.ts", count: 2, outside_git: false }],
+  needs_attention: [rawEvent],
+};
+
+describe("normalizeStats", () => {
+  it("normalizes the embedded needs_attention event rows", () => {
+    const s = normalizeStats(rawStats);
+    expect(s.needs_attention).toHaveLength(1);
+    expect(s.needs_attention[0].arguments_json).toEqual({ command: "npm test" });
+    expect(s.needs_attention[0].exit_ok).toBe(true);
+  });
+
+  it("passes the rest of the shape through unchanged", () => {
+    const s = normalizeStats(rawStats);
+    expect(s.has_any_events).toBe(true);
+    expect(s.cards.reasoning_coverage_pct).toBe(0.9);
+    expect(s.coverage.capture_health).toBe("healthy");
+  });
+
+  it("keeps a null reasoning_coverage_pct null, never coerced to 0", () => {
+    const s = normalizeStats({ ...rawStats, cards: { ...rawStats.cards, reasoning_coverage_pct: null } });
+    expect(s.cards.reasoning_coverage_pct).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import type { FlightEvent, Session } from "../types";
+import type { FlightEvent, Session, Stats, StatsCoverage, StatsCards, RiskDayBucket, MostTouchedFile } from "../types";
 import { RISK_TIERS } from "../types";
 import type { Provider } from "./agents";
 
@@ -226,6 +226,47 @@ export async function setRecordingPaused(paused: boolean): Promise<boolean> {
   if (!res.ok) throw new Error("Failed to update recording status");
   const data: { paused: boolean } = await res.json();
   return data.paused;
+}
+
+export async function getEvent(id: number): Promise<FlightEvent | null> {
+  const res = await fetch(`${API_BASE}/events/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch event");
+  const raw: RawEvent | null = await res.json();
+  return raw ? normalizeEvent(raw) : null;
+}
+
+export async function acknowledgeReview(eventId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_id: eventId }),
+  });
+  if (!res.ok) throw new Error("Could not acknowledge review");
+}
+
+// The backend already returns well-typed JSON (StatsCoverage/StatsCards/
+// RiskDayBucket/MostTouchedFile match server shapes 1:1) — the only real
+// normalization work is needs_attention, which carries raw event rows.
+interface RawStats {
+  has_any_events: boolean;
+  recording_paused: boolean;
+  days: number;
+  coverage: StatsCoverage;
+  cards: StatsCards;
+  risk_by_day: RiskDayBucket[];
+  most_touched_files: MostTouchedFile[];
+  needs_attention: RawEvent[];
+}
+
+export function normalizeStats(raw: RawStats): Stats {
+  return { ...raw, needs_attention: raw.needs_attention.map(normalizeEvent) };
+}
+
+export async function getStats(days = 14): Promise<Stats> {
+  const res = await fetch(`${API_BASE}/stats?days=${days}`);
+  if (!res.ok) throw new Error("Failed to fetch stats");
+  const raw: RawStats = await res.json();
+  return normalizeStats(raw);
 }
 
 export function streamEvents(

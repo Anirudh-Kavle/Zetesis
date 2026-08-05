@@ -1,4 +1,4 @@
-import type { Provider } from "../lib/agents";
+import type { KnownProvider, Provider } from "../lib/agents";
 
 // Zetesis event types — mirror of the SQLite `events` row (spec 3.3).
 export type RiskTier = "info" | "write" | "exec" | "network" | "sensitive";
@@ -88,3 +88,52 @@ export const RISK_TEXT: Record<RiskTier, string> = {
   network: "text-risk-network",
   sensitive: "text-risk-sensitive",
 };
+
+// --- Dashboard (/api/stats) ---
+
+export interface StatsProviderCoverage {
+  provider: KnownProvider;
+  last_event_ts: number | null;
+  active: boolean; // fired at least once in the requested window
+  event_count_window: number;
+}
+
+export interface StatsCoverage {
+  capture_health: "healthy" | "degraded";
+  gap_rate_recent: number | null;
+  gap_rate_prior: number | null;
+  compaction_shields_fired: number;
+  providers: StatsProviderCoverage[];
+}
+
+export interface StatsCards {
+  sensitive_this_week: number;
+  sensitive_prior_week: number;
+  actions_total: number;
+  actions_window: number;
+  reasoning_coverage_pct: number | null; // null when the window has zero tool-call events
+  files_touched_distinct: number;
+  files_touched_outside_git: number;
+}
+
+// One row of RiskFrequencyMap — a count per risk tier for a single day.
+export interface RiskDayBucket extends Record<RiskTier, number> {
+  date: string; // YYYY-MM-DD, local time
+}
+
+export interface MostTouchedFile {
+  path: string;
+  count: number;
+  outside_git: boolean;
+}
+
+export interface Stats {
+  has_any_events: boolean; // gates the whole dashboard's zero-state
+  recording_paused: boolean;
+  days: number;
+  coverage: StatsCoverage;
+  cards: StatsCards;
+  risk_by_day: RiskDayBucket[];
+  most_touched_files: MostTouchedFile[];
+  needs_attention: FlightEvent[];
+}
