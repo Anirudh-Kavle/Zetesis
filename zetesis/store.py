@@ -222,6 +222,16 @@ def set_budget(conn: sqlite3.Connection, scope: str, token_limit: int | None,
     )
 
 
+def insert_review(conn: sqlite3.Connection, event_id: int, acknowledged_at: int, by: str | None) -> None:
+    """Dashboard "needs attention" dismissal. ON CONFLICT DO NOTHING makes a
+    repeat acknowledgment of the same event a no-op instead of an error."""
+    conn.execute(
+        "INSERT INTO reviews (event_id, acknowledged_at, by) VALUES (?, ?, ?) "
+        "ON CONFLICT(event_id) DO NOTHING",
+        (event_id, acknowledged_at, by),
+    )
+
+
 def find_pending_pre_event(conn: sqlite3.Connection, session_id: str, tool: str) -> sqlite3.Row | None:
     """The most recent unpaired 'pre' row for this session+tool, if any.
 

@@ -79,3 +79,13 @@ CREATE TRIGGER IF NOT EXISTS events_au AFTER UPDATE ON events BEGIN
     INSERT INTO events_fts(rowid, arguments_text, reasoning_text)
     VALUES (new.id, new.arguments_json, new.reasoning_text);
 END;
+
+-- Dashboard "needs attention" acknowledgments. A separate table (not a
+-- mutable column on events) keeps the append-only event log untouched.
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id),
+    acknowledged_at INTEGER NOT NULL,
+    by TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_event ON reviews(event_id);

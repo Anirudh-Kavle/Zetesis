@@ -6,16 +6,20 @@ import asyncio
 import json
 import re
 import sqlite3
+import time
 from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import store
+from . import stats as stats_mod
 
 app = FastAPI(title="Zetesis")
+
+PROVIDERS = ["claude", "codex", "openai-api"]
 
 # Claude/Codex providers can occasionally deliver PreToolUse and PostToolUse
 # as separate rows. Do not show the empty pre-row when a completed post-row is
@@ -149,7 +153,7 @@ def update_scope_budget(scope: str, payload: dict) -> dict:
     time_limit_s = _budget_value(payload.get("time_limit_s"), "time_limit_s")
     conn = _conn()
     try:
-        store.set_budget(conn, scope, token_limit, time_limit_s, int(__import__("time").time() * 1000))
+        store.set_budget(conn, scope, token_limit, time_limit_s, int(time.time() * 1000))
         conn.commit()
         return {"scope": scope, "token_limit": token_limit, "time_limit_s": time_limit_s}
     finally:
@@ -316,6 +320,164 @@ def search(q: str = "", limit: int = 200) -> list[dict]:
         conn.close()
 
 
+@app.post("/api/reviews")
+def create_review(payload: dict) -> dict:
+    event_id = payload.get("event_id")
+    if not isinstance(event_id, int):
+        raise HTTPException(400, "event_id is required")
+    conn = _conn()
+    try:
+        if not conn.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone():
+            raise HTTPException(404, "Event not found")
+        store.insert_review(conn, event_id, int(time.time() * 1000), payload.get("by"))
+        conn.commit()
+        row = conn.execute(
+            "SELECT event_id, acknowledged_at, by FROM reviews WHERE event_id = ?", (event_id,)
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
+
+
+@app.get("/api/stats")
+def get_stats(days: int = 14) -> dict:
+    now = int(time.time() * 1000)
+    recent_start = now - days * 86_400_000
+    prior_start = now - 2 * days * 86_400_000
+    week_start = now - 7 * 86_400_000
+    prior_week_start = now - 14 * 86_400_000
+
+    conn = _conn()
+    try:
+        has_any = conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE tool IS NOT NULL)"
+        ).fetchone()[0] == 1
+
+        actions_total = conn.execute(
+            f"SELECT COUNT(*) FROM events WHERE tool IS NOT NULL AND {COMPLETED_ACTION_FILTER}"
+        ).fetchone()[0]
+        actions_window = conn.execute(
+            f"SELECT COUNT(*) FROM events WHERE tool IS NOT NULL AND {COMPLETED_ACTION_FILTER} AND ts >= ?",
+            (recent_start,),
+        ).fetchone()[0]
+
+        cov = conn.execute(
+            f"""
+            SELECT
+              AVG(CASE WHEN ts >= ? THEN (CASE WHEN capture_gap=0 THEN 1.0 ELSE 0 END) END) AS recent,
+              AVG(CASE WHEN ts >= ? AND ts < ? THEN (CASE WHEN capture_gap=0 THEN 1.0 ELSE 0 END) END) AS prior
+            FROM events WHERE tool IS NOT NULL AND {COMPLETED_ACTION_FILTER} AND ts >= ?
+            """,
+            (recent_start, prior_start, recent_start, prior_start),
+        ).fetchone()
+
+        provider_rows = [
+            dict(r)
+            for r in conn.execute(
+                """
+                SELECT provider,
+                       COUNT(*) FILTER (WHERE ts >= ?) AS recent_count,
+                       COUNT(*) FILTER (WHERE ts >= ? AND ts < ?) AS prior_count,
+                       MAX(ts) AS last_ts
+                FROM events WHERE provider IS NOT NULL AND tool IS NOT NULL
+                GROUP BY provider
+                """,
+                (recent_start, prior_start, recent_start),
+            ).fetchall()
+        ]
+        by_provider = {r["provider"]: r for r in provider_rows}
+        providers_out = [
+            {
+                "provider": p,
+                "last_event_ts": by_provider.get(p, {}).get("last_ts"),
+                "active": by_provider.get(p, {}).get("recent_count", 0) > 0,
+                "event_count_window": by_provider.get(p, {}).get("recent_count", 0),
+            }
+            for p in PROVIDERS
+        ]
+
+        shields = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE phase='compact' AND ts >= ?", (recent_start,)
+        ).fetchone()[0]
+
+        sensitive_this_week = conn.execute(
+            f"SELECT COUNT(*) FROM events WHERE risk='sensitive' AND tool IS NOT NULL "
+            f"AND {COMPLETED_ACTION_FILTER} AND ts >= ?",
+            (week_start,),
+        ).fetchone()[0]
+        sensitive_prior_week = conn.execute(
+            f"SELECT COUNT(*) FROM events WHERE risk='sensitive' AND tool IS NOT NULL "
+            f"AND {COMPLETED_ACTION_FILTER} AND ts >= ? AND ts < ?",
+            (prior_week_start, week_start),
+        ).fetchone()[0]
+
+        risk_day_rows = conn.execute(
+            f"""
+            SELECT strftime('%Y-%m-%d', ts/1000, 'unixepoch', 'localtime') AS day, risk, COUNT(*) AS n
+            FROM events WHERE tool IS NOT NULL AND {COMPLETED_ACTION_FILTER} AND ts >= ?
+            GROUP BY day, risk
+            """,
+            (recent_start,),
+        ).fetchall()
+
+        # Comma-join, not `events e JOIN sessions s` — COMPLETED_ACTION_FILTER
+        # hardcodes bare `events.column` references (see session_events/search
+        # above), so the events table must stay unaliased everywhere it's spliced in.
+        files_rows = conn.execute(
+            f"""
+            SELECT events.files_touched, sessions.cwd, sessions.git_repo
+            FROM events, sessions
+            WHERE sessions.id = events.session_id
+              AND events.tool IS NOT NULL AND {COMPLETED_ACTION_FILTER}
+              AND events.files_touched IS NOT NULL AND events.files_touched NOT IN ('', '[]')
+              AND events.ts >= ?
+            """,
+            (recent_start,),
+        ).fetchall()
+
+        needs_attention_rows = conn.execute(
+            f"""
+            SELECT * FROM events
+            WHERE tool IS NOT NULL AND {COMPLETED_ACTION_FILTER}
+              AND (risk = 'sensitive' OR capture_gap = 1)
+              AND NOT EXISTS (SELECT 1 FROM reviews WHERE reviews.event_id = events.id)
+            ORDER BY ts DESC LIMIT 10
+            """
+        ).fetchall()
+
+        files_stats = stats_mod.files_touched_stats(
+            (r["files_touched"], r["cwd"], r["git_repo"]) for r in files_rows
+        )
+        capture_health = stats_mod.classify_capture_health(cov["recent"], cov["prior"], provider_rows)
+
+        return {
+            "has_any_events": has_any,
+            "recording_paused": store.is_paused(),
+            "days": days,
+            "coverage": {
+                "capture_health": capture_health,
+                "gap_rate_recent": (1 - cov["recent"]) if cov["recent"] is not None else None,
+                "gap_rate_prior": (1 - cov["prior"]) if cov["prior"] is not None else None,
+                "compaction_shields_fired": shields,
+                "providers": providers_out,
+            },
+            "cards": {
+                "sensitive_this_week": sensitive_this_week,
+                "sensitive_prior_week": sensitive_prior_week,
+                "actions_total": actions_total,
+                "actions_window": actions_window,
+                "reasoning_coverage_pct": cov["recent"],
+                "files_touched_distinct": files_stats["distinct"],
+                "files_touched_outside_git": files_stats["outside_git"],
+            },
+            "risk_by_day": stats_mod.bucket_by_day(risk_day_rows, days),
+            "most_touched_files": files_stats["ranked"],
+            "needs_attention": [_event_to_dict(r) for r in needs_attention_rows],
+        }
+    finally:
+        conn.close()
+
+
 @app.get("/api/recording")
 def get_recording() -> dict:
     return {"paused": store.is_paused()}
@@ -359,6 +521,15 @@ async def stream():
 # the dist as data files if we ever ship one.
 DIST_DIR = Path(__file__).resolve().parents[2] / "viewer" / "dist"
 if DIST_DIR.is_dir():
+    # StaticFiles(html=True) only serves index.html for "/" itself, not for
+    # unmatched sub-paths — a hard refresh or direct link to the client-side
+    # /timeline route would 404 without this explicit fallback. Registered
+    # before the mount so it matches first; query strings (?event=5) don't
+    # affect path matching.
+    @app.get("/timeline")
+    def timeline_route() -> FileResponse:
+        return FileResponse(DIST_DIR / "index.html")
+
     app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui")
 else:
 
