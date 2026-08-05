@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FlightEvent } from "../types";
-import { eventSummary, reasoningFirstLine, shortSha, dayLabel, gitDirtySuffix, tokenizeJson, highlightJson } from "./format";
+import { eventSummary, reasoningFirstLine, shortSha, dayLabel, gitDirtySuffix, tokenizeJson, highlightJson, trendLabel } from "./format";
 import { parseQuery, filterEvents, activeQualifier } from "./search";
 
 const base: FlightEvent = {
@@ -163,5 +163,21 @@ describe("filterEvents", () => {
   });
   it("session: title match requires the title map — absent title falls back to id-only", () => {
     expect(filterEvents(events, "session:brainstorm")).toEqual([]);
+  });
+});
+
+describe("trendLabel", () => {
+  it("signs a positive delta with +", () => {
+    expect(trendLabel(5, 2)).toEqual({ direction: "up", delta: 3, label: "+3" });
+  });
+  it("signs a negative delta with -", () => {
+    expect(trendLabel(2, 5)).toEqual({ direction: "down", delta: -3, label: "-3" });
+  });
+  it("reports flat with ±0 when unchanged", () => {
+    expect(trendLabel(4, 4)).toEqual({ direction: "flat", delta: 0, label: "±0" });
+  });
+  it("handles a zero prior without dividing (a plain delta, not a rate)", () => {
+    expect(trendLabel(3, 0)).toEqual({ direction: "up", delta: 3, label: "+3" });
+    expect(trendLabel(0, 0)).toEqual({ direction: "flat", delta: 0, label: "±0" });
   });
 });

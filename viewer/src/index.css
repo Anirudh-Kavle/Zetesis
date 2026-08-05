@@ -1,5 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* shadcn/ui components (Card/Button/Badge/Alert/Separator) render through
+   Base UI's data-attribute variants and shadcn's own animation utilities —
+   both come from the two imports above and are kept. The generated Geist
+   font import and OKLCH light/dark palette are NOT kept: Zetesis has one
+   theme (dark) and one type family (IBM Plex) — see the @theme inline block
+   below, where every shadcn token is re-pointed at the existing palette
+   instead of the generated one. */
+
+@custom-variant dark (&:is(.dark *));
 
 /* Zetesis design tokens — restrained black-box.
    The risk palette IS the identity; REC is the only non-semantic accent. */
@@ -41,6 +53,33 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+#root {
+  position: relative;
+}
+
+/* A near-imperceptible grain — flat vector fills over near-black otherwise
+   read as sterile/screen-printed rather than a physical surface. Fixed +
+   pointer-events:none so it never intercepts input; kept at 2% so it reads
+   as texture, not noise. z-9999 matches this app's existing "always on top"
+   convention (TopBar's budget popover uses the same value) rather than
+   inventing a second one-off top layer. */
+#root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.02;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce), (prefers-contrast: more) {
+  #root::after {
+    display: none;
+  }
 }
 
 body {
@@ -127,5 +166,94 @@ input:focus-visible,
   }
   .fr-slide-in-right {
     animation: none !important;
+  }
+}
+
+@theme inline {
+  /* font-heading resolves through to our own --font-sans (IBM Plex Sans,
+     declared in the @theme block above) — no Geist override. */
+  --font-heading: var(--font-sans);
+
+  /* Every shadcn token below is pointed directly at Zetesis's existing
+     palette — never at the generated :root/.dark values (deleted; this app
+     has one theme, no toggle). --color-border is deliberately NOT
+     redeclared here: it already exists in the @theme block above
+     (#242c34) and every existing component already depends on it — adding
+     a second definition here would shadow it with a circular
+     var(--border) reference. */
+  --color-ring: var(--color-rec);
+  --color-input: var(--color-border);
+  --color-destructive: var(--color-risk-sensitive);
+  --color-destructive-foreground: var(--color-bg);
+  --color-accent-foreground: var(--color-ink);
+  --color-accent: var(--color-surface-2);
+  --color-muted-foreground: var(--color-ink-muted);
+  --color-muted: var(--color-surface-2);
+  --color-secondary-foreground: var(--color-ink);
+  --color-secondary: var(--color-surface-2);
+  --color-primary-foreground: var(--color-bg);
+  --color-primary: var(--color-risk-write);
+  --color-popover-foreground: var(--color-ink);
+  --color-popover: var(--color-surface-2);
+  --color-card-foreground: var(--color-ink);
+  --color-card: var(--color-surface-2);
+  --color-foreground: var(--color-ink);
+  --color-background: var(--color-bg);
+
+  /* Sidebar/chart tokens are unused by anything Zetesis renders today (no
+     shadcn Sidebar or Chart component in this feature) — left pointing at
+     their own harmless, never-read raw variables below rather than wired
+     into the risk palette prematurely. */
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --radius: 0.5rem;
+  /* Unused placeholders for the sidebar/chart tokens above — inert until a
+     future feature actually adds a shadcn Sidebar or Chart component. */
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }

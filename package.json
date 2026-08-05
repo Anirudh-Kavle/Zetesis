@@ -11,7 +11,11 @@
     "dev": "npm run dev:viewer",
     "dev:viewer": "cd viewer && npm run dev",
     "dev:daemon": "cd services/daemon && python -m fr_hook",
-    "dev:store": "cd services/store && uvicorn viewer:app --reload --host 127.0.0.1 --port 7878",
-    "install:all": "npm install && cd services/store && pip install -r requirements.txt && cd ../daemon && pip install -r requirements.txt"
+    "dev:store": ".venv/bin/uvicorn zetesis.viewer.app:app --reload --host 127.0.0.1 --port 7878",
+    "install:all": "npm install && cd services/store && pip install -r requirements.txt && cd ../daemon && pip install -r requirements.txt",
+    "test": "cd viewer && npm test && cd .. && .venv/bin/python -m pytest"
+  },
+  "devDependencies": {
+    "shadcn": "^4.16.0"
   }
 }

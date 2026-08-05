@@ -177,3 +177,18 @@ export function byNewest(a: FlightEvent, b: FlightEvent): number {
 
 export const isRiskTier = (v: string): v is RiskTier =>
   ["info", "write", "exec", "network", "sensitive"].includes(v);
+
+// Dashboard stat-card trend indicator — a signed delta, not a percentage
+// (the backend gives us two raw counts, not a rate; see DESIGN.md StatCards).
+export interface Trend {
+  direction: "up" | "down" | "flat";
+  delta: number;
+  label: string; // "+3" / "-2" / "±0"
+}
+
+export function trendLabel(current: number, prior: number): Trend {
+  const delta = current - prior;
+  const direction = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const label = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "±0";
+  return { direction, delta, label };
+}

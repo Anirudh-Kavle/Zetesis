@@ -7,6 +7,7 @@ import {
   PROVIDER_LABEL,
   PROVIDER_SHORT,
 } from "../lib/agents";
+import type { Route } from "../lib/router";
 import { Tooltip } from "./Tooltip";
 import { ProviderIcon } from "./ProviderIcon";
 
@@ -23,6 +24,8 @@ interface Props {
   onSelectGroup: (name: string | null) => void;
   agentFilter: Provider | null;
   onSelectAgent: (p: Provider | null) => void;
+  route: Route;
+  onNavigate: (route: Route) => void;
 }
 
 // Project identity is derived server-side (repo root, else working folder).
@@ -58,6 +61,8 @@ export function SessionSidebar({
   onSelectGroup,
   agentFilter,
   onSelectAgent,
+  route,
+  onNavigate,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -84,6 +89,40 @@ export function SessionSidebar({
 
   return (
     <aside style={{ width }} className="relative flex min-w-52 max-w-[38vw] shrink-0 flex-col overflow-hidden border-r border-border bg-surface/40">
+      {/* Route shortcut — the spec's "reachable via sidebar shortcut" for the
+          full timeline, and the way back to the dashboard from it. Same pill
+          language as the Agent chips directly below: no new visual pattern
+          introduced just for navigation. */}
+      <div className="border-b border-border px-3 py-3">
+        <SidebarHeading>View</SidebarHeading>
+        <div className="mt-1 flex flex-wrap gap-1">
+          <button
+            onClick={() => onNavigate("/")}
+            title="Dashboard"
+            className={[
+              "cursor-pointer rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors active:scale-95",
+              route === "/"
+                ? "border-transparent bg-surface-2 text-ink"
+                : "border-border text-ink-muted hover:bg-surface/70 hover:text-ink",
+            ].join(" ")}
+          >
+            Dashboard
+          </button>
+          <button
+            onClick={() => onNavigate("/timeline")}
+            title="Full timeline"
+            className={[
+              "cursor-pointer rounded-full border px-2.5 py-1 font-mono text-[11px] transition-colors active:scale-95",
+              route === "/timeline"
+                ? "border-transparent bg-surface-2 text-ink"
+                : "border-border text-ink-muted hover:bg-surface/70 hover:text-ink",
+            ].join(" ")}
+          >
+            Full timeline
+          </button>
+        </div>
+      </div>
+
       {/* Agent scope — splits the unified timeline by which hook recorded the
           event, since Claude Code and Codex can run against the same repo at once. */}
       <div className="border-b border-border px-3 py-3">

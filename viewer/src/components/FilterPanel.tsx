@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Terminal, FilePen, FileSearch, Globe, Plug, Ellipsis, type LucideIcon } from "lucide-react";
 import type { Session } from "../types";
 import { RISK_TIERS, RISK_DOT, RISK_LABEL, type RiskTier } from "../types";
 import { parseQuery } from "../lib/search";
@@ -32,13 +33,13 @@ function tagToken(tag: ToolTag): string {
 // `hint` is one plain sentence for the row's hover tooltip — deliberately
 // not a join of every tag's own description either, which for "other"
 // (30+ tools) turned into a run-on wall of text with no punctuation.
-const KIND_GROUP_ORDER: { key: string; kinds: ToolKind[]; label: string; hint: string }[] = [
-  { key: "bash", kinds: ["bash"], label: "Shell", hint: "Runs shell commands." },
-  { key: "editwrite", kinds: ["edit", "write"], label: "Files", hint: "Creates or modifies files." },
-  { key: "read", kinds: ["read"], label: "Read", hint: "Reads files or searches the codebase." },
-  { key: "webfetch", kinds: ["webfetch"], label: "Web", hint: "Fetches web pages or runs web searches." },
-  { key: "mcp", kinds: ["mcp"], label: "MCP", hint: "Calls tools exposed by connected MCP servers." },
-  { key: "other", kinds: ["other"], label: "Other", hint: "Planning, task tracking, scheduling, and workflow tools." },
+const KIND_GROUP_ORDER: { key: string; kinds: ToolKind[]; label: string; hint: string; icon: LucideIcon }[] = [
+  { key: "bash", kinds: ["bash"], label: "Shell", hint: "Runs shell commands.", icon: Terminal },
+  { key: "editwrite", kinds: ["edit", "write"], label: "Files", hint: "Creates or modifies files.", icon: FilePen },
+  { key: "read", kinds: ["read"], label: "Read", hint: "Reads files or searches the codebase.", icon: FileSearch },
+  { key: "webfetch", kinds: ["webfetch"], label: "Web", hint: "Fetches web pages or runs web searches.", icon: Globe },
+  { key: "mcp", kinds: ["mcp"], label: "MCP", hint: "Calls tools exposed by connected MCP servers.", icon: Plug },
+  { key: "other", kinds: ["other"], label: "Other", hint: "Planning, task tracking, scheduling, and workflow tools.", icon: Ellipsis },
 ];
 
 interface ToolGroup {
@@ -47,14 +48,15 @@ interface ToolGroup {
   hint: string;
   risk: RiskTier;
   tags: ToolTag[];
+  icon: LucideIcon;
 }
 
 function buildToolGroups(catalog: ToolTag[]): ToolGroup[] {
   const groups: ToolGroup[] = [];
-  for (const { key, kinds, label, hint } of KIND_GROUP_ORDER) {
+  for (const { key, kinds, label, hint, icon } of KIND_GROUP_ORDER) {
     const tags = catalog.filter((t) => kinds.includes(t.kind));
     if (tags.length === 0) continue;
-    groups.push({ key, label, hint, risk: tags[0].risk, tags });
+    groups.push({ key, label, hint, risk: tags[0].risk, tags, icon });
   }
   return groups;
 }
@@ -192,6 +194,7 @@ export function FilterPanel({ value, onChange, sessions, agentFilter }: Props) {
                 checked={isGroupChecked(g)}
                 onChange={() => toggleGroup(g)}
                 dotClass={RISK_DOT[g.risk]}
+                icon={g.icon}
                 label={g.label}
                 title={g.hint}
                 truncate
@@ -223,6 +226,7 @@ function CheckRow({
   onChange,
   label,
   dotClass,
+  icon: Icon,
   bold = false,
   truncate = false,
   title,
@@ -231,6 +235,7 @@ function CheckRow({
   onChange: () => void;
   label: string;
   dotClass?: string;
+  icon?: LucideIcon;
   bold?: boolean;
   truncate?: boolean;
   title?: string;
@@ -254,6 +259,7 @@ function CheckRow({
           </svg>
         )}
       </span>
+      {Icon && <Icon className={`h-3 w-3 shrink-0 ${checked ? "text-ink" : "text-ink-faint"}`} strokeWidth={1.5} aria-hidden />}
       <span
         className={[
           "font-mono",
